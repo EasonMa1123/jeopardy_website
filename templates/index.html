@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jeopardy Game</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to Jeopardy!</h1>
+        <div class="button-group">
+            <a href="{{ url_for('host_login') }}" class="btn btn-primary">Host Login</a>
+            <a href="{{ url_for('player_join') }}" class="btn btn-secondary">Join as Player</a>
+        </div>
+    </div>
+</body>
+</html>
+

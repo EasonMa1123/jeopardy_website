@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player Game - {{ room_code }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/game.css') }}">
+</head>
+<body>
+    <div class="game-container player-view">
+        <div class="game-header">
+            <h1>Room: {{ room_code }}</h1>
+            <h2>Player: {{ player_name }}</h2>
+        </div>
+        
+        <div class="player-layout">
+            <div class="main-content">
+                <div class="current-question-section">
+                    <h2>Current Question</h2>
+                    <div id="currentQuestionDisplay">
+                        <p>Waiting for host to start a question...</p>
+                    </div>
+                    
+                    <div id="buzzerSection" style="display: none;">
+                        <button id="buzzerBtn" class="buzzer-button" disabled>BUZZ IN</button>
+                        <div id="buzzerStatus"></div>
+                    </div>
+                    
+                    <div id="answerSection" style="display: none;">
+                        <h3>Your Turn to Answer!</h3>
+                        <div class="form-group">
+                            <input type="text" id="answerInput" placeholder="Enter your answer..." />
+                            <button id="submitAnswerBtn" class="btn btn-primary">Submit Answer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <div class="player-info">
+                    <h3>Your Score</h3>
+                    <div id="playerScore" class="score-display">$0</div>
+                </div>
+                
+                <div class="leaderboard">
+                    <h3>Leaderboard</h3>
+                    <div id="leaderboardList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const roomCode = '{{ room_code }}';
+        const playerName = '{{ player_name }}';
+    </script>
+    <script src="{{ url_for('static', filename='js/player_game.js') }}"></script>
+</body>
+</html>
+

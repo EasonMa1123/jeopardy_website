@@ -1,0 +1,335 @@
+.game-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+    background: white;
+    min-height: 100vh;
+}
+
+.game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.game-header h1 {
+    color: white;
+    margin: 0;
+    text-shadow: none;
+}
+
+.game-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+}
+
+.left-panel, .right-panel {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.question-management h2 {
+    margin-bottom: 15px;
+}
+
+.questions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.question-card {
+    background: #1e3c72;
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.question-card:hover:not(.answered) {
+    transform: scale(1.05);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+}
+
+.question-card.answered {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #6c757d;
+}
+
+.question-category {
+    font-size: 14px;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.question-value {
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.question-status {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    font-size: 10px;
+    background: rgba(255,255,255,0.3);
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+.current-question-section {
+    margin-bottom: 30px;
+}
+
+.current-question {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    border: 3px solid #667eea;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.question-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.question-header .category {
+    font-size: 18px;
+    font-weight: bold;
+    color: #667eea;
+}
+
+.question-header .value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #28a745;
+}
+
+.question-text {
+    font-size: 20px;
+    margin: 20px 0;
+    line-height: 1.6;
+    color: #333;
+}
+
+.answer-text {
+    font-size: 18px;
+    color: #666;
+    font-style: italic;
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #e9ecef;
+}
+
+.players-section {
+    margin-bottom: 30px;
+}
+
+.players-list {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.player-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 5px;
+    border-left: 4px solid #667eea;
+}
+
+.player-item.active {
+    background: #fff3cd;
+    border-left-color: #ffc107;
+    font-weight: bold;
+}
+
+.player-name {
+    font-weight: bold;
+    color: #333;
+}
+
+.player-score {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.buzzer-section {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.buzzer-status {
+    padding: 15px;
+    background: #e9ecef;
+    border-radius: 5px;
+    margin-bottom: 15px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.buzzer-status.active {
+    background: #fff3cd;
+    color: #856404;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.submitted-answer {
+    background: #e9ecef;
+    padding: 15px;
+    border-radius: 5px;
+    margin: 15px 0;
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+    border-left: 4px solid #667eea;
+}
+
+.answer-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.answer-actions .btn {
+    flex: 1;
+}
+
+/* Player View Styles */
+.player-view {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.player-view .game-container {
+    background: transparent;
+}
+
+.player-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+}
+
+.main-content {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.player-info, .leaderboard {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.score-display {
+    font-size: 48px;
+    font-weight: bold;
+    color: #28a745;
+    text-align: center;
+    margin-top: 10px;
+}
+
+.buzzer-button {
+    width: 100%;
+    padding: 30px;
+    font-size: 32px;
+    font-weight: bold;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin: 20px 0;
+    box-shadow: 0 5px 20px rgba(220, 53, 69, 0.4);
+}
+
+.buzzer-button:hover:not(:disabled) {
+    background: #c82333;
+    transform: scale(1.05);
+    box-shadow: 0 8px 25px rgba(220, 53, 69, 0.6);
+}
+
+.buzzer-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.buzzer-button.active {
+    background: #ffc107;
+    color: #000;
+    animation: pulse 0.5s infinite;
+}
+
+.leaderboard-list {
+    margin-top: 15px;
+}
+
+.leaderboard-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 5px;
+}
+
+.leaderboard-item.current-player {
+    background: #fff3cd;
+    font-weight: bold;
+    border-left: 4px solid #ffc107;
+}
+
+@media (max-width: 768px) {
+    .game-layout,
+    .player-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .questions-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+}
+

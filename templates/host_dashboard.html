@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Host Dashboard - Jeopardy</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="dashboard-header">
+            <h1>Host Dashboard</h1>
+            <p>Welcome, {{ session.username }}!</p>
+            <a href="{{ url_for('host_logout') }}" class="btn btn-secondary">Logout</a>
+        </div>
+        
+        <div class="games-section">
+            <h2>Your Games</h2>
+            <button id="createGameBtn" class="btn btn-primary">Create New Game</button>
+            
+            <div id="gamesList" class="games-list">
+                {% for game in games %}
+                <div class="game-card">
+                    <h3>Room: {{ game.room_code }}</h3>
+                    <p>Status: {{ game.status }}</p>
+                    <p>Created: {{ game.created_at }}</p>
+                    <a href="{{ url_for('host_game', room_code=game.room_code) }}" class="btn btn-primary">Open Game</a>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/host_dashboard.js') }}"></script>
+</body>
+</html>
+
