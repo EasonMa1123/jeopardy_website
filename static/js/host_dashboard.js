@@ -24,5 +24,28 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Error creating game');
         }
     });
+    
+    // Delete game buttons
+    document.querySelectorAll('.delete-game-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const gameId = this.dataset.gameId;
+            if (confirm('Are you sure you want to delete this game? This cannot be undone.')) {
+                try {
+                    const response = await fetch(`/host/delete_game/${gameId}`, {
+                        method: 'POST'
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error deleting game: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Error deleting game');
+                }
+            }
+        });
+    });
 });
 

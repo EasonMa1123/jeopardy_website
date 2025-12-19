@@ -2,6 +2,42 @@ let pollInterval;
 let canBuzz = false;
 let isCurrentBuzzer = false;
 
+// Global function for submitting answers (accessible from MC options)
+async function submitAnswer(answerText) {
+    if (!answerText || !answerText.trim()) {
+        alert('Please enter an answer');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/player/submit_answer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ answer_text: answerText.trim() })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            if (data.is_correct) {
+                alert('Correct! +$' + (data.value || ''));
+            } else {
+                alert('Incorrect. Passing to next player...');
+            }
+            const answerInput = document.getElementById('answerInput');
+            if (answerInput) answerInput.value = '';
+            // State will update via polling
+        } else {
+            alert('Error: ' + (data.error || 'Could not submit answer'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error submitting answer');
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     startPolling();
@@ -38,47 +74,21 @@ function setupEventListeners() {
         }
     });
     
-    submitAnswerBtn.addEventListener('click', async () => {
-        const answer = answerInput.value.trim();
-        if (!answer) {
-            alert('Please enter an answer');
-            return;
-        }
-        
-        try {
-            const response = await fetch('/player/submit_answer', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ answer_text: answer })
-            });
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                if (data.is_correct) {
-                    alert('Correct! +$' + (data.value || ''));
-                } else {
-                    alert('Incorrect. Passing to next player...');
-                }
-                answerInput.value = '';
-                // State will update via polling
-            } else {
-                alert('Error: ' + (data.error || 'Could not submit answer'));
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('Error submitting answer');
-        }
-    });
+    if (submitAnswerBtn) {
+        submitAnswerBtn.addEventListener('click', async () => {
+            const answer = answerInput.value.trim();
+            await submitAnswer(answer);
+        });
+    }
     
     // Allow Enter key to submit answer
-    answerInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            submitAnswerBtn.click();
-        }
-    });
+    if (answerInput) {
+        answerInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                submitAnswerBtn.click();
+            }
+        });
+    }
 }
 
 function startPolling() {
@@ -88,6 +98,11 @@ function startPolling() {
             const data = await response.json();
             
             if (data.error) {
+                if (data.game_ended) {
+                    alert('The game has ended. You will be redirected.');
+                    window.location.href = '/player/join';
+                    return;
+                }
                 console.error('Polling error:', data.error);
                 return;
             }
@@ -126,7 +141,46 @@ function updateGameState(state) {
                 buzzerSection.style.display = 'none';
                 answerSection.style.display = 'block';
                 isCurrentBuzzer = true;
-            } else if (state.can_buzz && !state.buzzer_player) {
+                
+                // Show appropriate input based on question type
+                const typeAnswerInput = document.getElementById('typeAnswerInput');
+                const mcAnswerInput = document.getElementById('mcAnswerInput');
+                const mcOptionsList = document.getElementById('mcOptionsList');
+                
+                if (question.question_type === 'multiple_choice' && question.options_list && question.options_list.length > 0) {
+                    typeAnswerInput.style.display = 'none';
+                    mcAnswerInput.style.display = 'block';
+                    mcOptionsList.innerHTML = '';
+                    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+                    question.options_list.forEach((option, index) => {
+                        const optionDiv = document.createElement('div');
+                        optionDiv.className = 'mc-option';
+                        optionDiv.innerHTML = `<span class="mc-label">${labels[index]}.</span> ${option}`;
+                        optionDiv.dataset.option = option;
+                        optionDiv.addEventListener('click', function() {
+                            document.querySelectorAll('.mc-option').forEach(opt => opt.classList.remove('selected'));
+                            this.classList.add('selected');
+                            // Auto-submit after selection
+                            setTimeout(() => {
+                                submitAnswer(option);
+                            }, 300);
+                        });
+                        mcOptionsList.appendChild(optionDiv);
+                    });
+                } else {
+                    typeAnswerInput.style.display = 'block';
+                    mcAnswerInput.style.display = 'none';
+                }
+            } else if (state.countdown_remaining && state.countdown_remaining > 0) {
+                // Still in countdown
+                buzzerSection.style.display = 'block';
+                answerSection.style.display = 'none';
+                buzzerBtn.disabled = true;
+                buzzerBtn.textContent = 'WAIT...';
+                buzzerBtn.classList.remove('active');
+                buzzerStatus.textContent = `Countdown: ${Math.ceil(state.countdown_remaining)}s`;
+                canBuzz = false;
+            } else if (state.can_buzz && !state.game.current_buzzer_player_id) {
                 // Buzzer is active and no one has buzzed yet
                 buzzerSection.style.display = 'block';
                 answerSection.style.display = 'none';
@@ -134,9 +188,9 @@ function updateGameState(state) {
                 buzzerBtn.textContent = 'BUZZ IN';
                 buzzerBtn.classList.remove('active');
                 
-                // Show countdown
+                // Show time remaining
                 if (state.game.question_start_time) {
-                    const elapsed = Math.max(0, state.game.buzzer_timeout - Math.floor((new Date() - new Date(state.game.question_start_time)) / 1000));
+                    const elapsed = Math.max(0, state.game.buzzer_timeout - Math.floor((new Date() - new Date(state.game.question_start_time)) / 1000) + 3);
                     buzzerStatus.textContent = `Time remaining: ${elapsed}s`;
                 }
                 canBuzz = true;
@@ -145,8 +199,8 @@ function updateGameState(state) {
                 buzzerSection.style.display = 'block';
                 answerSection.style.display = 'none';
                 buzzerBtn.disabled = true;
-                if (state.buzzer_player) {
-                    buzzerStatus.textContent = `${state.buzzer_player.name} buzzed in!`;
+                if (state.game.current_buzzer_player_id) {
+                    buzzerStatus.textContent = 'Someone buzzed in!';
                 } else {
                     buzzerStatus.textContent = 'Buzzer time expired!';
                 }

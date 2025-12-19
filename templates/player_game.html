@@ -29,9 +29,13 @@
                     
                     <div id="answerSection" style="display: none;">
                         <h3>Your Turn to Answer!</h3>
-                        <div class="form-group">
-                            <input type="text" id="answerInput" placeholder="Enter your answer..." />
+                        <div id="typeAnswerInput" class="form-group" style="display: none;">
+                            <input type="text" id="answerInput" class="answer-input" placeholder="Enter your answer..." />
                             <button id="submitAnswerBtn" class="btn btn-primary">Submit Answer</button>
+                        </div>
+                        <div id="mcAnswerInput" class="mc-options" style="display: none;">
+                            <p>Select your answer:</p>
+                            <div id="mcOptionsList"></div>
                         </div>
                     </div>
                 </div>

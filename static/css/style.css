@@ -39,6 +39,11 @@ h2 {
     margin: 50px auto;
 }
 
+.login-box h1 {
+    color: #333;
+    text-shadow: none;
+}
+
 .form-group {
     margin-bottom: 20px;
 }
@@ -142,6 +147,16 @@ h2 {
     justify-content: space-between;
     align-items: center;
     box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.dashboard-header h1 {
+    color: #333;
+    text-shadow: none;
+    margin-bottom: 0;
+}
+
+.dashboard-header p {
+    color: #666;
 }
 
 .games-section {

@@ -18,18 +18,26 @@
             <div class="left-panel">
                 <div class="question-management">
                     <h2>Questions</h2>
-                    <button id="addQuestionBtn" class="btn btn-primary">Add Question</button>
-                    <div id="questionsGrid" class="questions-grid">
-                        {% for question in questions %}
-                        <div class="question-card" data-question-id="{{ question.id }}" 
-                             data-category="{{ question.category }}" 
-                             data-value="{{ question.value }}"
-                             data-answered="{{ 'true' if question.is_answered else 'false' }}">
-                            <div class="question-category">{{ question.category }}</div>
-                            <div class="question-value">${{ question.value }}</div>
-                            {% if question.is_answered %}
-                                <div class="question-status answered">Answered</div>
-                            {% endif %}
+                    <div id="questionsGrid" class="questions-by-category">
+                        {% for category, cat_questions in questions_by_category.items() %}
+                        <div class="category-column">
+                            <h3 class="category-header">{{ category }}</h3>
+                            <div class="category-questions">
+                                {% for question in cat_questions %}
+                                <div class="question-card" data-question-id="{{ question.id }}" 
+                                     data-category="{{ question.category }}" 
+                                     data-value="{{ question.value }}"
+                                     data-answered="{{ 'true' if question.is_answered else 'false' }}">
+                                    <div class="question-value">${{ question.value }}</div>
+                                    {% if question.is_answered %}
+                                        <div class="question-status answered">Answered</div>
+                                        {% if question.answered_by_name %}
+                                            <div class="answered-by">By: {{ question.answered_by_name }}</div>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
                         </div>
                         {% endfor %}
                     </div>
@@ -37,21 +45,14 @@
             </div>
             
             <div class="right-panel">
+                <div class="game-controls">
+                    <button id="restartGameBtn" class="btn btn-secondary">Restart Game</button>
+                    <button id="endGameBtn" class="btn btn-danger">End Game</button>
+                </div>
                 <div class="current-question-section">
                     <h2>Current Question</h2>
                     <div id="currentQuestionDisplay">
-                        {% if current_question %}
-                        <div class="current-question">
-                            <div class="question-header">
-                                <span class="category">{{ current_question.category }}</span>
-                                <span class="value">${{ current_question.value }}</span>
-                            </div>
-                            <div class="question-text">{{ current_question.question_text }}</div>
-                            <div class="answer-text">Answer: {{ current_question.answer }}</div>
-                        </div>
-                        {% else %}
                         <p>No question active. Click a question card to start.</p>
-                        {% endif %}
                     </div>
                 </div>
                 
@@ -81,35 +82,22 @@
                             <button id="wrongBtn" class="btn btn-danger">Wrong</button>
                         </div>
                     </div>
+                    <div id="answerHistory" class="answer-history" style="display: none;">
+                        <h3>Answer History</h3>
+                        <div id="answerHistoryList"></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- Add Question Modal -->
-    <div id="addQuestionModal" class="modal">
-        <div class="modal-content">
+    <!-- Question Popup Modal -->
+    <div id="questionModal" class="modal">
+        <div class="modal-content question-modal-content">
             <span class="close">&times;</span>
-            <h2>Add Question</h2>
-            <form id="addQuestionForm">
-                <div class="form-group">
-                    <label for="category">Category:</label>
-                    <input type="text" id="category" name="category" required>
-                </div>
-                <div class="form-group">
-                    <label for="value">Value ($):</label>
-                    <input type="number" id="value" name="value" min="100" step="100" required>
-                </div>
-                <div class="form-group">
-                    <label for="question_text">Question:</label>
-                    <textarea id="question_text" name="question_text" rows="3" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="answer">Answer:</label>
-                    <input type="text" id="answer" name="answer" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Add Question</button>
-            </form>
+            <div id="questionModalContent">
+                <!-- Content will be populated by JavaScript -->
+            </div>
         </div>
     </div>
     

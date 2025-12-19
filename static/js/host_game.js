@@ -7,70 +7,69 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function setupEventListeners() {
-    // Add Question Modal
-    const addQuestionBtn = document.getElementById('addQuestionBtn');
-    const modal = document.getElementById('addQuestionModal');
-    const closeBtn = modal.querySelector('.close');
-    const addQuestionForm = document.getElementById('addQuestionForm');
-    
-    addQuestionBtn.addEventListener('click', () => {
-        modal.style.display = 'block';
-    });
-    
-    closeBtn.addEventListener('click', () => {
-        modal.style.display = 'none';
-    });
-    
-    window.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.style.display = 'none';
-        }
-    });
-    
-    addQuestionForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const formData = {
-            game_id: gameId,
-            category: document.getElementById('category').value,
-            value: parseInt(document.getElementById('value').value),
-            question_text: document.getElementById('question_text').value,
-            answer: document.getElementById('answer').value
-        };
-        
-        try {
-            const response = await fetch('/host/add_question', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(formData)
-            });
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                modal.style.display = 'none';
-                addQuestionForm.reset();
-                // Reload to show new question
-                window.location.reload();
-            } else {
-                alert('Error adding question: ' + (data.error || 'Unknown error'));
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('Error adding question');
-        }
-    });
-    
     // Question card clicks
     document.querySelectorAll('.question-card').forEach(card => {
         card.addEventListener('click', function() {
-            if (this.classList.contains('answered')) return;
+            if (this.dataset.answered === 'true') return;
             
             const questionId = this.dataset.questionId;
-            startQuestion(questionId);
+            showQuestionPopup(questionId);
         });
+    });
+    
+    // Restart game button
+    document.getElementById('restartGameBtn').addEventListener('click', async () => {
+        if (confirm('Are you sure you want to restart this game? All scores and question answers will be reset.')) {
+            try {
+                const response = await fetch(`/host/restart_game/${gameId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Game restarted. All scores and answers have been reset.');
+                    window.location.reload();
+                } else {
+                    alert('Error restarting game: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error restarting game');
+            }
+        }
+    });
+    
+    // End game button
+    document.getElementById('endGameBtn').addEventListener('click', async () => {
+        if (confirm('Are you sure you want to end this game? All players will be kicked out.')) {
+            try {
+                const response = await fetch(`/host/end_game/${gameId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Game ended. All players have been kicked out.');
+                    window.location.reload();
+                } else {
+                    alert('Error ending game: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error ending game');
+            }
+        }
+    });
+    
+    // Question modal close
+    const questionModal = document.getElementById('questionModal');
+    const questionModalClose = questionModal.querySelector('.close');
+    questionModalClose.addEventListener('click', () => {
+        questionModal.style.display = 'none';
+    });
+    
+    window.addEventListener('click', (e) => {
+        if (e.target === questionModal) {
+            questionModal.style.display = 'none';
+        }
     });
     
     // Answer buttons
@@ -85,6 +84,68 @@ function setupEventListeners() {
             submitAnswer(currentBuzzerPlayerId, false);
         }
     });
+}
+
+async function showQuestionPopup(questionId) {
+    // Get question details from the card
+    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+    const category = card.dataset.category;
+    const value = card.dataset.value;
+    
+    // Show popup with question (without answer)
+    const modal = document.getElementById('questionModal');
+    const modalContent = document.getElementById('questionModalContent');
+    
+    // Fetch full question details
+    try {
+        const response = await fetch(`/host/get_question/${questionId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const question = data.question;
+            let optionsHtml = '';
+            
+            if (question.question_type === 'multiple_choice' && question.options_list) {
+                const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+                optionsHtml = '<div class="mc-options-display"><p><strong>Options:</strong></p>';
+                question.options_list.forEach((option, index) => {
+                    optionsHtml += `<div class="mc-option-display">${labels[index]}. ${option}</div>`;
+                });
+                optionsHtml += '</div>';
+            }
+            
+            modalContent.innerHTML = `
+                <h2>${category} - $${value}</h2>
+                <div class="question-text-large">${question.question_text}</div>
+                ${optionsHtml}
+                <div id="answerDisplay" style="display: none;">
+                    <div class="answer-text-large"><strong>Answer:</strong> ${question.answer}</div>
+                </div>
+                <div class="question-popup-actions">
+                    <button id="startQuestionBtn" class="btn btn-primary">Start Question</button>
+                    <button id="showAnswerBtn" class="btn btn-secondary">Show Answer</button>
+                </div>
+            `;
+            
+            modal.style.display = 'block';
+            
+            // Start question button
+            document.getElementById('startQuestionBtn').addEventListener('click', async () => {
+                await startQuestion(questionId);
+                modal.style.display = 'none';
+            });
+            
+            // Show answer button
+            document.getElementById('showAnswerBtn').addEventListener('click', () => {
+                document.getElementById('answerDisplay').style.display = 'block';
+            });
+        } else {
+            alert('Error loading question: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error loading question');
+    }
 }
 
 async function startQuestion(questionId) {
@@ -156,10 +217,16 @@ function startPolling() {
 }
 
 function updateGameState(state) {
-    // Update current question display
+    // Update current question display (don't show answer until correct)
     const currentQuestionDisplay = document.getElementById('currentQuestionDisplay');
     if (state.current_question) {
         const question = state.current_question;
+        // Only show answer if question is answered
+        let answerHtml = '';
+        if (question.is_answered && question.answer) {
+            answerHtml = `<div class="answer-text">Answer: ${question.answer}</div>`;
+        }
+        
         currentQuestionDisplay.innerHTML = `
             <div class="current-question">
                 <div class="question-header">
@@ -167,7 +234,7 @@ function updateGameState(state) {
                     <span class="value">$${question.value}</span>
                 </div>
                 <div class="question-text">${question.question_text}</div>
-                <div class="answer-text">Answer: ${question.answer}</div>
+                ${answerHtml}
             </div>
         `;
         
@@ -175,6 +242,10 @@ function updateGameState(state) {
         document.querySelectorAll('.question-card').forEach(card => {
             if (card.dataset.questionId == question.id) {
                 card.style.border = '3px solid #ffc107';
+                card.style.boxShadow = '0 0 10px rgba(255, 193, 7, 0.5)';
+            } else {
+                card.style.border = '';
+                card.style.boxShadow = '';
             }
         });
     } else {
@@ -182,6 +253,7 @@ function updateGameState(state) {
         // Remove active border from all cards
         document.querySelectorAll('.question-card').forEach(card => {
             card.style.border = '';
+            card.style.boxShadow = '';
         });
     }
     
@@ -221,18 +293,54 @@ function updateGameState(state) {
                     
                     // Show submitted answer if available
                     if (state.latest_answer) {
-                        submittedAnswerDiv.innerHTML = `<strong>Answer:</strong> ${state.latest_answer.answer_text}`;
+                        const isCorrect = state.latest_answer.is_correct;
+                        const statusClass = isCorrect ? 'correct' : 'incorrect';
+                        const statusText = isCorrect ? '✓ Correct' : '✗ Incorrect';
+                        submittedAnswerDiv.innerHTML = `
+                            <div class="answer-status ${statusClass}">${statusText}</div>
+                            <div><strong>Answer:</strong> ${state.latest_answer.answer_text}</div>
+                        `;
                         submittedAnswerDiv.style.display = 'block';
                     } else {
                         submittedAnswerDiv.innerHTML = '<em>Waiting for answer...</em>';
                         submittedAnswerDiv.style.display = 'block';
                     }
+                    
+                    // Show answer history
+                    const answerHistory = document.getElementById('answerHistory');
+                    const answerHistoryList = document.getElementById('answerHistoryList');
+                    if (state.answer_history && state.answer_history.length > 0) {
+                        answerHistory.style.display = 'block';
+                        answerHistoryList.innerHTML = '';
+                        state.answer_history.forEach(answer => {
+                            const isCorrect = answer.is_correct;
+                            const statusClass = isCorrect ? 'correct' : 'incorrect';
+                            const statusText = isCorrect ? '✓ Correct' : '✗ Incorrect';
+                            const item = document.createElement('div');
+                            item.className = `answer-history-item ${statusClass}`;
+                            item.innerHTML = `
+                                <div class="answer-history-player">${answer.player_name}</div>
+                                <div class="answer-history-answer">${answer.answer_text}</div>
+                                <div class="answer-history-status ${statusClass}">${statusText}</div>
+                            `;
+                            answerHistoryList.appendChild(item);
+                        });
+                    } else {
+                        answerHistory.style.display = 'none';
+                    }
                 } else {
-                    const elapsed = Math.max(0, state.game.buzzer_timeout - Math.floor((new Date() - new Date(state.game.question_start_time)) / 1000));
-                    buzzerStatus.innerHTML = `<p>Buzzer active! Time remaining: ${elapsed}s</p>`;
-                    buzzerStatus.className = 'buzzer-status active';
-                    answerSection.style.display = 'none';
-                    currentBuzzerPlayerId = null;
+                    if (state.countdown_remaining && state.countdown_remaining > 0) {
+                        buzzerStatus.innerHTML = `<p>Countdown: ${Math.ceil(state.countdown_remaining)}s</p>`;
+                        buzzerStatus.className = 'buzzer-status';
+                        answerSection.style.display = 'none';
+                        currentBuzzerPlayerId = null;
+                    } else {
+                        const elapsed = Math.max(0, state.game.buzzer_timeout - Math.floor((new Date() - new Date(state.game.question_start_time)) / 1000) + 3);
+                        buzzerStatus.innerHTML = `<p>Buzzer active! Time remaining: ${elapsed}s</p>`;
+                        buzzerStatus.className = 'buzzer-status active';
+                        answerSection.style.display = 'none';
+                        currentBuzzerPlayerId = null;
+                    }
                 }
             } else {
                 buzzerStatus.innerHTML = '<p>Waiting for question...</p>';

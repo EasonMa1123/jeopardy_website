@@ -23,8 +23,13 @@
                 <div class="game-card">
                     <h3>Room: {{ game.room_code }}</h3>
                     <p>Status: {{ game.status }}</p>
+                    <p>Questions: {{ game.question_count or 0 }}</p>
                     <p>Created: {{ game.created_at }}</p>
-                    <a href="{{ url_for('host_game', room_code=game.room_code) }}" class="btn btn-primary">Open Game</a>
+                    <div class="game-actions">
+                        <a href="{{ url_for('host_setup', room_code=game.room_code) }}" class="btn btn-secondary">Setup Questions</a>
+                        <a href="{{ url_for('host_game', room_code=game.room_code) }}" class="btn btn-primary">Start Game</a>
+                        <button class="btn btn-danger delete-game-btn" data-game-id="{{ game.id }}">Delete Game</button>
+                    </div>
                 </div>
                 {% endfor %}
             </div>

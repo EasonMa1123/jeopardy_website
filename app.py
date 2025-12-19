@@ -12,16 +12,16 @@ app.secret_key = secrets.token_hex(16)
 timeout = 10
 # Database configuration - will be updated with actual credentials
 DB_CONFIG = {
-    charset="utf8mb4",
-    connect_timeout=timeout,
-    cursorclass=pymysql.cursors.DictCursor,
-    db="defaultdb",
-    host="mysql-2bd98258-d15-b95b.e.aivencloud.com",
-    password="************************",
-    read_timeout=timeout,
-    port=22772,
-    user="avnadmin",
-    write_timeout=timeout
+    'charset': 'utf8mb4',
+    'connect_timeout': timeout,
+    'cursorclass': pymysql.cursors.DictCursor,
+    'db': 'defaultdb',
+    'host': 'mysql-2bd98258-d15-b95b.e.aivencloud.com',
+    'password': 'AVNS_jY_AdoAn1a8svXP93g5',
+    'read_timeout': timeout,
+    'port': 22772,
+    'user': 'avnadmin',
+    'write_timeout': timeout
 }
 
 
@@ -57,11 +57,18 @@ def init_db():
                     buzzer_active BOOLEAN DEFAULT FALSE,
                     buzzer_timeout INT DEFAULT 3,
                     current_buzzer_player_id INT,
+                    is_ended BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (host_id) REFERENCES users(id),
                     INDEX idx_room_code (room_code)
                 )
             """)
+            
+            # Add is_ended column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE games ADD COLUMN is_ended BOOLEAN DEFAULT FALSE")
+            except:
+                pass
             
             # Questions table
             cursor.execute("""
@@ -72,11 +79,29 @@ def init_db():
                     value INT NOT NULL,
                     question_text TEXT NOT NULL,
                     answer TEXT NOT NULL,
+                    question_type VARCHAR(20) DEFAULT 'type_answer',
+                    options TEXT,
                     is_answered BOOLEAN DEFAULT FALSE,
+                    answered_by_player_id INT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (game_id) REFERENCES games(id)
+                    FOREIGN KEY (game_id) REFERENCES games(id),
+                    FOREIGN KEY (answered_by_player_id) REFERENCES players(id)
                 )
             """)
+            
+            # Add new columns if they don't exist (for existing databases)
+            try:
+                cursor.execute("ALTER TABLE questions ADD COLUMN question_type VARCHAR(20) DEFAULT 'type_answer'")
+            except:
+                pass
+            try:
+                cursor.execute("ALTER TABLE questions ADD COLUMN options TEXT")
+            except:
+                pass
+            try:
+                cursor.execute("ALTER TABLE questions ADD COLUMN answered_by_player_id INT")
+            except:
+                pass
             
             # Players table (temporary players in game)
             cursor.execute("""
@@ -191,13 +216,41 @@ def host_dashboard():
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM games WHERE host_id = %s ORDER BY created_at DESC
+                SELECT g.*, 
+                       (SELECT COUNT(*) FROM questions WHERE game_id = g.id) as question_count
+                FROM games g WHERE g.host_id = %s ORDER BY created_at DESC
             """, (session['host_id'],))
             games = cursor.fetchall()
     finally:
         conn.close()
     
     return render_template('host_dashboard.html', games=games)
+
+@app.route('/host/setup/<room_code>')
+@host_login_required
+def host_setup(room_code):
+    """Page to set up questions before starting the game"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM games WHERE room_code = %s AND host_id = %s
+            """, (room_code, session['host_id']))
+            game = cursor.fetchone()
+            
+            if not game:
+                return redirect(url_for('host_dashboard'))
+            
+            # Get questions
+            cursor.execute("""
+                SELECT * FROM questions WHERE game_id = %s ORDER BY category, value
+            """, (game['id'],))
+            questions = cursor.fetchall()
+            
+    finally:
+        conn.close()
+    
+    return render_template('host_setup.html', game=game, questions=questions)
 
 @app.route('/host/game/<room_code>')
 @host_login_required
@@ -215,11 +268,22 @@ def host_game(room_code):
             if not game:
                 return redirect(url_for('host_dashboard'))
             
-            # Get questions
+            # Get questions with answered_by info
             cursor.execute("""
-                SELECT * FROM questions WHERE game_id = %s ORDER BY category, value
+                SELECT q.*, p.name as answered_by_name
+                FROM questions q
+                LEFT JOIN players p ON q.answered_by_player_id = p.id
+                WHERE q.game_id = %s ORDER BY q.category, q.value
             """, (game['id'],))
             questions = cursor.fetchall()
+            
+            # Group questions by category
+            questions_by_category = {}
+            for question in questions:
+                category = question['category']
+                if category not in questions_by_category:
+                    questions_by_category[category] = []
+                questions_by_category[category].append(question)
             
             # Get players
             cursor.execute("""
@@ -232,11 +296,18 @@ def host_game(room_code):
             if game['current_question_id']:
                 cursor.execute("SELECT * FROM questions WHERE id = %s", (game['current_question_id'],))
                 current_question = cursor.fetchone()
+                if current_question and current_question.get('options'):
+                    import json
+                    try:
+                        current_question['options_list'] = json.loads(current_question['options'])
+                    except:
+                        current_question['options_list'] = []
             
     finally:
         conn.close()
     
     return render_template('host_game.html', game=game, questions=questions, 
+                         questions_by_category=questions_by_category,
                          players=players, current_question=current_question)
 
 @app.route('/host/create_game', methods=['POST'])
@@ -266,6 +337,21 @@ def add_question():
     value = data.get('value')
     question_text = data.get('question_text')
     answer = data.get('answer')
+    question_type = data.get('question_type', 'type_answer')
+    options = data.get('options', '[]')
+    
+    import json
+    # Validate options is valid JSON
+    try:
+        if question_type == 'multiple_choice':
+            options_list = json.loads(options) if isinstance(options, str) else options
+            if not isinstance(options_list, list) or len(options_list) < 2:
+                return jsonify({'success': False, 'error': 'Multiple choice questions need at least 2 options'}), 400
+            options = json.dumps(options_list)
+        else:
+            options = None
+    except:
+        return jsonify({'success': False, 'error': 'Invalid options format'}), 400
     
     conn = get_db_connection()
     try:
@@ -277,15 +363,170 @@ def add_question():
                 return jsonify({'success': False, 'error': 'Unauthorized'}), 403
             
             cursor.execute("""
-                INSERT INTO questions (game_id, category, value, question_text, answer)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (game_id, category, value, question_text, answer))
+                INSERT INTO questions (game_id, category, value, question_text, answer, question_type, options)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (game_id, category, value, question_text, answer, question_type, options))
             conn.commit()
             question_id = cursor.lastrowid
     finally:
         conn.close()
     
     return jsonify({'success': True, 'question_id': question_id})
+
+@app.route('/host/delete_question/<int:question_id>', methods=['POST'])
+@host_login_required
+def delete_question(question_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify question belongs to host's game
+            cursor.execute("""
+                SELECT q.*, g.host_id 
+                FROM questions q 
+                JOIN games g ON q.game_id = g.id 
+                WHERE q.id = %s
+            """, (question_id,))
+            question = cursor.fetchone()
+            
+            if not question or question['host_id'] != session['host_id']:
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
+            conn.commit()
+    finally:
+        conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/host/delete_game/<int:game_id>', methods=['POST'])
+@host_login_required
+def delete_game(game_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify game belongs to host
+            cursor.execute("SELECT id FROM games WHERE id = %s AND host_id = %s", 
+                         (game_id, session['host_id']))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            # Delete all related data
+            cursor.execute("DELETE FROM answers WHERE question_id IN (SELECT id FROM questions WHERE game_id = %s)", (game_id,))
+            cursor.execute("DELETE FROM questions WHERE game_id = %s", (game_id,))
+            cursor.execute("DELETE FROM players WHERE game_id = %s", (game_id,))
+            cursor.execute("DELETE FROM games WHERE id = %s", (game_id,))
+            conn.commit()
+    finally:
+        conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/host/end_game/<int:game_id>', methods=['POST'])
+@host_login_required
+def end_game(game_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify game belongs to host
+            cursor.execute("SELECT id FROM games WHERE id = %s AND host_id = %s", 
+                         (game_id, session['host_id']))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            # Mark game as ended and clear current question
+            cursor.execute("""
+                UPDATE games 
+                SET is_ended = TRUE, 
+                    current_question_id = NULL,
+                    buzzer_active = FALSE,
+                    current_buzzer_player_id = NULL
+                WHERE id = %s
+            """, (game_id,))
+            conn.commit()
+    finally:
+        conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/host/restart_game/<int:game_id>', methods=['POST'])
+@host_login_required
+def restart_game(game_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify game belongs to host
+            cursor.execute("SELECT id FROM games WHERE id = %s AND host_id = %s", 
+                         (game_id, session['host_id']))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            # Reset all player scores
+            cursor.execute("""
+                UPDATE players SET score = 0 WHERE game_id = %s
+            """, (game_id,))
+            
+            # Reset all question answers
+            cursor.execute("""
+                UPDATE questions 
+                SET is_answered = FALSE, answered_by_player_id = NULL 
+                WHERE game_id = %s
+            """, (game_id,))
+            
+            # Delete all answer records
+            cursor.execute("""
+                DELETE FROM answers 
+                WHERE question_id IN (SELECT id FROM questions WHERE game_id = %s)
+            """, (game_id,))
+            
+            # Reset game state
+            cursor.execute("""
+                UPDATE games 
+                SET is_ended = FALSE,
+                    current_question_id = NULL,
+                    buzzer_active = FALSE,
+                    current_buzzer_player_id = NULL,
+                    question_start_time = NULL
+                WHERE id = %s
+            """, (game_id,))
+            
+            # Reset all players' buzzer status
+            cursor.execute("""
+                UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+            """, (game_id,))
+            
+            conn.commit()
+    finally:
+        conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/host/get_question/<int:question_id>')
+@host_login_required
+def get_question(question_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT q.*, g.host_id 
+                FROM questions q 
+                JOIN games g ON q.game_id = g.id 
+                WHERE q.id = %s AND g.host_id = %s
+            """, (question_id, session['host_id']))
+            question = cursor.fetchone()
+            
+            if not question:
+                return jsonify({'success': False, 'error': 'Question not found'}), 404
+            
+            if question.get('options'):
+                import json
+                try:
+                    question['options_list'] = json.loads(question['options'])
+                except:
+                    question['options_list'] = []
+    finally:
+        conn.close()
+    
+    return jsonify({'success': True, 'question': question})
 
 @app.route('/host/start_question', methods=['POST'])
 @host_login_required
@@ -308,20 +549,22 @@ def start_question():
             if not question:
                 return jsonify({'success': False, 'error': 'Question not found'}), 404
             
-            # Reset all players' buzzer status
+            # Reset all players' buzzer status (they can all buzz after countdown)
             cursor.execute("""
-                UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+                UPDATE players SET can_buzz = FALSE WHERE game_id = %s
             """, (question['game_id'],))
             
-            # Update game state
+            # Update game state - start with buzzer inactive for countdown
             cursor.execute("""
                 UPDATE games 
                 SET current_question_id = %s, 
                     question_start_time = NOW(),
-                    buzzer_active = TRUE,
+                    buzzer_active = FALSE,
                     current_buzzer_player_id = NULL
                 WHERE id = %s
             """, (question_id, question['game_id']))
+            
+            # Enable buzzer after 3 seconds (handled by polling)
             
             conn.commit()
     finally:
@@ -380,10 +623,10 @@ def submit_answer():
                     UPDATE players SET score = score + %s WHERE id = %s
                 """, (question['value'], player_id))
                 
-                # Mark question as answered
+                # Mark question as answered and track who answered
                 cursor.execute("""
-                    UPDATE questions SET is_answered = TRUE WHERE id = %s
-                """, (question['id'],))
+                    UPDATE questions SET is_answered = TRUE, answered_by_player_id = %s WHERE id = %s
+                """, (player_id, question['id'],))
                 
                 # Reset game state
                 cursor.execute("""
@@ -399,43 +642,35 @@ def submit_answer():
                     UPDATE players SET can_buzz = TRUE WHERE game_id = %s
                 """, (player['game_id'],))
             else:
-                # Move to next player
+                # Find next player who has buzzed (can_buzz = FALSE) but hasn't answered yet
+                # Get all players who buzzed, ordered by who buzzed first (we'll use buzzer_order as proxy)
                 cursor.execute("""
                     SELECT id FROM players 
-                    WHERE game_id = %s AND buzzer_order > %s 
-                    ORDER BY buzzer_order LIMIT 1
-                """, (player['game_id'], player['buzzer_order']))
-                next_player = cursor.fetchone()
+                    WHERE game_id = %s AND can_buzz = FALSE AND id != %s
+                    ORDER BY buzzer_order
+                """, (player['game_id'], player_id))
+                buzzed_players = cursor.fetchall()
                 
                 next_player_id = None
-                if next_player:
-                    next_player_id = next_player['id']
+                if buzzed_players:
+                    # Get the first player who buzzed (after current player)
+                    for buzzed_player in buzzed_players:
+                        if buzzed_player['id'] != player_id:
+                            next_player_id = buzzed_player['id']
+                            break
+                
+                if next_player_id:
                     cursor.execute("""
                         UPDATE games SET current_buzzer_player_id = %s WHERE id = %s
                     """, (next_player_id, player['game_id']))
                 else:
-                    # Cycle back to first player
+                    # No one else buzzed, re-enable buzzer for all players
                     cursor.execute("""
-                        SELECT id FROM players 
-                        WHERE game_id = %s 
-                        ORDER BY buzzer_order LIMIT 1
+                        UPDATE players SET can_buzz = TRUE WHERE game_id = %s
                     """, (player['game_id'],))
-                    first_player = cursor.fetchone()
-                    if first_player:
-                        next_player_id = first_player['id']
-                        cursor.execute("""
-                            UPDATE games SET current_buzzer_player_id = %s WHERE id = %s
-                        """, (next_player_id, player['game_id']))
-                
-                if next_player_id:
-                    # Reset all players' buzzer status
                     cursor.execute("""
-                        UPDATE players SET can_buzz = FALSE WHERE game_id = %s
+                        UPDATE games SET current_buzzer_player_id = NULL WHERE id = %s
                     """, (player['game_id'],))
-                    # Enable buzzer only for the next player
-                    cursor.execute("""
-                        UPDATE players SET can_buzz = TRUE WHERE id = %s
-                    """, (next_player_id,))
             
             conn.commit()
     finally:
@@ -464,6 +699,12 @@ def host_game_state(room_code):
             if game['current_question_id']:
                 cursor.execute("SELECT * FROM questions WHERE id = %s", (game['current_question_id'],))
                 current_question = cursor.fetchone()
+                if current_question and current_question.get('options'):
+                    import json
+                    try:
+                        current_question['options_list'] = json.loads(current_question['options'])
+                    except:
+                        current_question['options_list'] = []
             
             # Get players
             cursor.execute("""
@@ -489,15 +730,47 @@ def host_game_state(room_code):
                 """, (game['current_question_id'], game['current_buzzer_player_id']))
                 latest_answer = cursor.fetchone()
             
-            # Check if buzzer timeout
-            buzzer_expired = False
-            if game['buzzer_active'] and game['question_start_time']:
+            # Get all answer attempts for current question (to show history)
+            answer_history = []
+            if game['current_question_id']:
+                cursor.execute("""
+                    SELECT a.*, p.name as player_name 
+                    FROM answers a
+                    JOIN players p ON a.player_id = p.id
+                    WHERE a.question_id = %s
+                    ORDER BY a.answered_at DESC
+                """, (game['current_question_id'],))
+                answer_history = cursor.fetchall()
+            
+            # Check countdown and enable buzzer after 3 seconds
+            countdown_remaining = 0
+            if game['current_question_id'] and game['question_start_time']:
                 cursor.execute("""
                     SELECT TIMESTAMPDIFF(SECOND, %s, NOW()) as elapsed
                 """, (game['question_start_time'],))
                 elapsed = cursor.fetchone()['elapsed']
-                if elapsed > game['buzzer_timeout']:
-                    buzzer_expired = True
+                
+                if elapsed < 3:
+                    # Still in countdown
+                    countdown_remaining = 3 - elapsed
+                    if game['buzzer_active']:
+                        cursor.execute("""
+                            UPDATE games SET buzzer_active = FALSE WHERE id = %s
+                        """, (game['id'],))
+                        conn.commit()
+                elif not game['buzzer_active'] and not game['current_buzzer_player_id']:
+                    # Countdown finished, enable buzzer
+                    cursor.execute("""
+                        UPDATE games SET buzzer_active = TRUE WHERE id = %s
+                    """, (game['id'],))
+                    cursor.execute("""
+                        UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+                    """, (game['id'],))
+                    conn.commit()
+                    game['buzzer_active'] = True
+            
+            # No timeout - buzzer stays active until someone answers correctly
+            buzzer_expired = False
             
     finally:
         conn.close()
@@ -508,7 +781,9 @@ def host_game_state(room_code):
         'players': players,
         'buzzer_player': buzzer_player,
         'buzzer_expired': buzzer_expired,
-        'latest_answer': latest_answer
+        'latest_answer': latest_answer,
+        'answer_history': answer_history,
+        'countdown_remaining': countdown_remaining
     })
 
 # Player routes
@@ -530,6 +805,9 @@ def player_join():
                 
                 if not game:
                     return render_template('player_join.html', error='Invalid room code')
+                
+                if game.get('is_ended'):
+                    return render_template('player_join.html', error='This game has ended')
                 
                 # Check if player name already exists in this game
                 cursor.execute("""
@@ -603,27 +881,17 @@ def player_buzz():
                 return jsonify({'success': False, 'error': 'Buzzer not active'}), 400
             
             if not player['can_buzz']:
-                return jsonify({'success': False, 'error': 'Already buzzed or not your turn'}), 400
+                return jsonify({'success': False, 'error': 'You have already buzzed in'}), 400
             
-            # Check if buzzer timeout
-            if player['question_start_time']:
+            # Allow multiple players to buzz - set this player as current buzzer if no one is currently answering
+            # If someone is already answering, they can still buzz (will be queued for next turn)
+            if not player['current_buzzer_player_id']:
+                # No one is currently answering, set this player as buzzer
                 cursor.execute("""
-                    SELECT TIMESTAMPDIFF(SECOND, %s, NOW()) as elapsed
-                """, (player['question_start_time'],))
-                elapsed = cursor.fetchone()['elapsed']
-                if elapsed > player['buzzer_timeout']:
-                    return jsonify({'success': False, 'error': 'Buzzer timeout'}), 400
+                    UPDATE games SET current_buzzer_player_id = %s WHERE id = %s
+                """, (player_id, player['game_id']))
             
-            # Check if someone already buzzed
-            if player['current_buzzer_player_id']:
-                return jsonify({'success': False, 'error': 'Someone already buzzed'}), 400
-            
-            # Set this player as buzzer
-            cursor.execute("""
-                UPDATE games SET current_buzzer_player_id = %s WHERE id = %s
-            """, (player_id, player['game_id']))
-            
-            # Disable buzzer for this player
+            # Disable buzzer for this player (they can't buzz again)
             cursor.execute("""
                 UPDATE players SET can_buzz = FALSE WHERE id = %s
             """, (player_id,))
@@ -733,6 +1001,9 @@ def player_game_state(room_code):
             if not game:
                 return jsonify({'error': 'Game not found'}), 404
             
+            if game.get('is_ended'):
+                return jsonify({'error': 'Game ended', 'game_ended': True}), 200
+            
             # Get current player
             cursor.execute("SELECT * FROM players WHERE id = %s", (player_id,))
             player = cursor.fetchone()
@@ -745,6 +1016,13 @@ def player_game_state(room_code):
                 # Don't send answer to player
                 if current_question:
                     current_question.pop('answer', None)
+                    # Parse options if MC question
+                    if current_question.get('options'):
+                        import json
+                        try:
+                            current_question['options_list'] = json.loads(current_question['options'])
+                        except:
+                            current_question['options_list'] = []
             
             # Get all players (for leaderboard)
             cursor.execute("""
@@ -753,17 +1031,37 @@ def player_game_state(room_code):
             """, (game['id'],))
             players = cursor.fetchall()
             
-            # Check if buzzer timeout
-            buzzer_expired = False
-            can_buzz = player['can_buzz'] and game['buzzer_active']
-            if game['buzzer_active'] and game['question_start_time']:
+            # Check countdown and enable buzzer after 3 seconds
+            countdown_remaining = 0
+            if game['current_question_id'] and game['question_start_time']:
                 cursor.execute("""
                     SELECT TIMESTAMPDIFF(SECOND, %s, NOW()) as elapsed
                 """, (game['question_start_time'],))
                 elapsed = cursor.fetchone()['elapsed']
-                if elapsed > game['buzzer_timeout']:
-                    buzzer_expired = True
-                    can_buzz = False
+                
+                if elapsed < 3:
+                    # Still in countdown
+                    countdown_remaining = 3 - elapsed
+                    if game['buzzer_active']:
+                        cursor.execute("""
+                            UPDATE games SET buzzer_active = FALSE WHERE id = %s
+                        """, (game['id'],))
+                        conn.commit()
+                elif not game['buzzer_active'] and not game['current_buzzer_player_id']:
+                    # Countdown finished, enable buzzer
+                    cursor.execute("""
+                        UPDATE games SET buzzer_active = TRUE WHERE id = %s
+                    """, (game['id'],))
+                    cursor.execute("""
+                        UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+                    """, (game['id'],))
+                    conn.commit()
+                    game['buzzer_active'] = True
+                    player['can_buzz'] = True
+            
+            # No timeout - buzzer stays active until someone answers correctly
+            buzzer_expired = False
+            can_buzz = player['can_buzz'] and game['buzzer_active']
             
             is_current_buzzer = game['current_buzzer_player_id'] == player_id
             
@@ -777,7 +1075,8 @@ def player_game_state(room_code):
         'players': players,
         'can_buzz': can_buzz,
         'buzzer_expired': buzzer_expired,
-        'is_current_buzzer': is_current_buzzer
+        'is_current_buzzer': is_current_buzzer,
+        'countdown_remaining': countdown_remaining
     })
 
 if __name__ == '__main__':
