@@ -2,13 +2,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const createGameBtn = document.getElementById('createGameBtn');
     const gamesList = document.getElementById('gamesList');
     
-    createGameBtn.addEventListener('click', async function() {
+    createGameBtn.addEventListener('click', function() {
+        // Show modal for creating game
+        const gameName = prompt('Enter game name (optional):');
+        if (gameName === null) return; // User cancelled
+        
+        const gameDescription = prompt('Enter game description (optional):');
+        if (gameDescription === null) return; // User cancelled
+        
+        createGame(gameName || '', gameDescription || '');
+    });
+    
+    async function createGame(gameName, gameDescription) {
         try {
             const response = await fetch('/host/create_game', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
-                }
+                },
+                body: JSON.stringify({
+                    game_name: gameName,
+                    game_description: gameDescription
+                })
             });
             
             const data = await response.json();
@@ -23,7 +38,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error:', error);
             alert('Error creating game');
         }
-    });
+    }
     
     // Delete game buttons
     document.querySelectorAll('.delete-game-btn').forEach(btn => {

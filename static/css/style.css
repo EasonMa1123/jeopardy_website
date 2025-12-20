@@ -197,6 +197,12 @@ h2 {
     margin-bottom: 5px;
 }
 
+.game-description {
+    font-style: italic;
+    color: #888;
+    margin: 10px 0;
+}
+
 /* Modal Styles */
 .modal {
     display: none;

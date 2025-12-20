@@ -1,5 +1,6 @@
 let pollInterval;
 let currentBuzzerPlayerId = null;
+let lastAnswerId = null; // Track last answer to show popup only once
 
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
@@ -7,7 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function setupEventListeners() {
-    // Question card clicks
+    // Question card clicks - answered questions should not be clickable
     document.querySelectorAll('.question-card').forEach(card => {
         card.addEventListener('click', function() {
             if (this.dataset.answered === 'true') return;
@@ -72,18 +73,7 @@ function setupEventListeners() {
         }
     });
     
-    // Answer buttons
-    document.getElementById('correctBtn').addEventListener('click', () => {
-        if (currentBuzzerPlayerId) {
-            submitAnswer(currentBuzzerPlayerId, true);
-        }
-    });
-    
-    document.getElementById('wrongBtn').addEventListener('click', () => {
-        if (currentBuzzerPlayerId) {
-            submitAnswer(currentBuzzerPlayerId, false);
-        }
-    });
+    // Answers are now auto-checked when players submit - no manual buttons needed
 }
 
 async function showQuestionPopup(questionId) {
@@ -171,32 +161,8 @@ async function startQuestion(questionId) {
     }
 }
 
-async function submitAnswer(playerId, isCorrect) {
-    try {
-        const response = await fetch('/host/submit_answer', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                player_id: playerId,
-                is_correct: isCorrect
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            currentBuzzerPlayerId = null;
-            // Update will come from polling
-        } else {
-            alert('Error submitting answer: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error submitting answer');
-    }
-}
+// Answers are now auto-checked when players submit - no manual submission needed
+// The result will be shown automatically via polling updates
 
 function startPolling() {
     pollInterval = setInterval(async () => {
@@ -217,6 +183,39 @@ function startPolling() {
 }
 
 function updateGameState(state) {
+    // Update question cards based on answered status
+    // First, get all questions with their answered status
+    if (state.questions) {
+        state.questions.forEach(q => {
+            const card = document.querySelector(`[data-question-id="${q.id}"]`);
+            if (card) {
+                if (q.is_answered) {
+                    card.dataset.answered = 'true';
+                    // Add answered indicator if not present
+                    if (!card.querySelector('.question-status.answered')) {
+                        const statusDiv = document.createElement('div');
+                        statusDiv.className = 'question-status answered';
+                        statusDiv.textContent = 'Answered';
+                        if (q.answered_by_name) {
+                            const byDiv = document.createElement('div');
+                            byDiv.className = 'answered-by';
+                            byDiv.textContent = `By: ${q.answered_by_name}`;
+                            card.appendChild(byDiv);
+                        }
+                        card.appendChild(statusDiv);
+                    }
+                } else {
+                    card.dataset.answered = 'false';
+                    // Remove answered indicators
+                    const statusDiv = card.querySelector('.question-status.answered');
+                    if (statusDiv) statusDiv.remove();
+                    const byDiv = card.querySelector('.answered-by');
+                    if (byDiv) byDiv.remove();
+                }
+            }
+        });
+    }
+    
     // Update current question display (don't show answer until correct)
     const currentQuestionDisplay = document.getElementById('currentQuestionDisplay');
     if (state.current_question) {
@@ -257,27 +256,73 @@ function updateGameState(state) {
         });
     }
     
-    // Update players list
+    // Update players list - show all players with their answer status, hide if game is ended
     const playersList = document.getElementById('playersList');
-    playersList.innerHTML = '';
-    state.players.forEach(player => {
-        const playerItem = document.createElement('div');
-        playerItem.className = 'player-item';
-        playerItem.dataset.playerId = player.id;
-        if (state.buzzer_player && state.buzzer_player.id === player.id) {
-            playerItem.classList.add('active');
+    const playersSection = document.querySelector('.players-section');
+    if (state.game && state.game.is_ended) {
+        if (playersSection) playersSection.style.display = 'none';
+        playersList.innerHTML = '';
+    } else {
+        if (playersSection) {
+            if (state.players && state.players.length > 0) {
+                playersSection.style.display = 'block';
+                // Update header to indicate answer status
+                const playersHeader = playersSection.querySelector('h2');
+                if (playersHeader && state.current_question) {
+                    playersHeader.textContent = 'Players (Answered)';
+                } else if (playersHeader) {
+                    playersHeader.textContent = 'Players';
+                }
+            } else {
+                playersSection.style.display = 'none';
+            }
         }
-        playerItem.innerHTML = `
-            <span class="player-name">${player.name}</span>
-            <span class="player-score">Score: $${player.score}</span>
-        `;
-        playersList.appendChild(playerItem);
-    });
+        playersList.innerHTML = '';
+        if (state.players) {
+            state.players.forEach(player => {
+                const playerItem = document.createElement('div');
+                playerItem.className = 'player-item';
+                playerItem.dataset.playerId = player.id;
+                if (state.buzzer_player && state.buzzer_player.id === player.id) {
+                    playerItem.classList.add('active');
+                }
+                
+                // Show answer status if available
+                let answerStatusHtml = '';
+                if (player.is_correct_answer !== null && player.is_correct_answer !== undefined) {
+                    const statusClass = player.is_correct_answer ? 'correct' : 'incorrect';
+                    const statusText = player.is_correct_answer ? '✓ Correct' : '✗ Incorrect';
+                    answerStatusHtml = `<span class="answer-status ${statusClass}">${statusText}</span>`;
+                }
+                
+                playerItem.innerHTML = `
+                    <span class="player-name">${player.name}</span>
+                    <span class="player-score">Score: $${player.score}</span>
+                    ${answerStatusHtml}
+                `;
+                playersList.appendChild(playerItem);
+            });
+        }
+    }
     
             // Update buzzer status
             const buzzerStatus = document.getElementById('buzzerStatus');
             const answerSection = document.getElementById('answerSection');
             const submittedAnswerDiv = document.getElementById('submittedAnswer');
+            
+            // Check for latest_answer popup first (before buzzer_player check) to handle incorrect answers immediately
+            if (state.current_question && state.latest_answer && state.latest_answer.id && state.latest_answer.id !== lastAnswerId) {
+                lastAnswerId = state.latest_answer.id;
+                const isCorrect = state.latest_answer.is_correct;
+                const playerName = state.latest_answer.player_name || (state.buzzer_player ? state.buzzer_player.name : 'Unknown');
+                // Show popup immediately for both correct and incorrect answers
+                showAnswerResultPopup({
+                    is_correct: isCorrect,
+                    player_name: playerName,
+                    answer_text: state.latest_answer.answer_text,
+                    question_value: isCorrect ? state.current_question.value : 0
+                });
+            }
             
             if (state.game.buzzer_active && state.current_question) {
                 if (state.buzzer_expired) {
@@ -328,7 +373,23 @@ function updateGameState(state) {
                     } else {
                         answerHistory.style.display = 'none';
                     }
+                    
                 } else {
+                    // No current buzzer player - show latest answer if available (for incorrect answers that cleared buzzer)
+                    if (state.latest_answer) {
+                        const isCorrect = state.latest_answer.is_correct;
+                        const statusClass = isCorrect ? 'correct' : 'incorrect';
+                        const statusText = isCorrect ? '✓ Correct' : '✗ Incorrect';
+                        submittedAnswerDiv.innerHTML = `
+                            <div class="answer-status ${statusClass}">${statusText}</div>
+                            <div><strong>Answer:</strong> ${state.latest_answer.answer_text}</div>
+                        `;
+                        submittedAnswerDiv.style.display = 'block';
+                    } else {
+                        submittedAnswerDiv.innerHTML = '<em>Waiting for answer...</em>';
+                        submittedAnswerDiv.style.display = 'none';
+                    }
+                    
                     if (state.countdown_remaining && state.countdown_remaining > 0) {
                         buzzerStatus.innerHTML = `<p>Countdown: ${Math.ceil(state.countdown_remaining)}s</p>`;
                         buzzerStatus.className = 'buzzer-status';
@@ -343,11 +404,74 @@ function updateGameState(state) {
                     }
                 }
             } else {
+                // Check if we should show popup for a correct answer that just cleared the question
+                if (state.recent_answer && state.recent_answer.id && state.recent_answer.id !== lastAnswerId) {
+                    if (state.recent_answer.is_correct) {
+                        lastAnswerId = state.recent_answer.id;
+                        showAnswerResultPopup({
+                            is_correct: true,
+                            player_name: state.recent_answer.player_name,
+                            answer_text: state.recent_answer.answer_text,
+                            question_value: state.recent_answer.value
+                        });
+                    }
+                }
+                
                 buzzerStatus.innerHTML = '<p>Waiting for question...</p>';
                 buzzerStatus.className = 'buzzer-status';
                 answerSection.style.display = 'none';
                 currentBuzzerPlayerId = null;
             }
+}
+
+let popupAutoCloseTimer = null;
+
+function showAnswerResultPopup(data) {
+    const modal = document.getElementById('answerResultModal');
+    const content = document.getElementById('answerResultContent');
+    
+    // Clear any existing auto-close timer
+    if (popupAutoCloseTimer) {
+        clearTimeout(popupAutoCloseTimer);
+        popupAutoCloseTimer = null;
+    }
+    
+    // Close modal if already open to prevent flashing
+    if (modal.style.display === 'block') {
+        modal.style.display = 'none';
+    }
+    
+    const isCorrect = data.is_correct;
+    const statusClass = isCorrect ? 'correct' : 'incorrect';
+    const statusText = isCorrect ? '✓ CORRECT!' : '✗ INCORRECT';
+    const message = isCorrect 
+        ? `${data.player_name} answered correctly!<br>Answer: "${data.answer_text}"<br>Score: +$${data.question_value}`
+        : `${data.player_name} answered incorrectly.<br>Answer: "${data.answer_text}"<br>Passing to next player...`;
+    
+    content.innerHTML = `
+        <div class="answer-result-popup ${statusClass}">
+            <h2>${statusText}</h2>
+            <div class="answer-result-message">${message}</div>
+            <button class="btn btn-primary" id="closePopupBtn">OK</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+    
+    // Add close button handler
+    document.getElementById('closePopupBtn').addEventListener('click', () => {
+        modal.style.display = 'none';
+        if (popupAutoCloseTimer) {
+            clearTimeout(popupAutoCloseTimer);
+            popupAutoCloseTimer = null;
+        }
+    });
+    
+    // Auto-close after 3 seconds
+    popupAutoCloseTimer = setTimeout(() => {
+        modal.style.display = 'none';
+        popupAutoCloseTimer = null;
+    }, 3000);
 }
 
 // Clean up on page unload

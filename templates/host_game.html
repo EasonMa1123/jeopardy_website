@@ -10,7 +10,13 @@
 <body>
     <div class="game-container">
         <div class="game-header">
-            <h1>Room: {{ game.room_code }}</h1>
+            <div>
+                <h1>{% if game.game_name %}{{ game.game_name }}{% else %}Room: {{ game.room_code }}{% endif %}</h1>
+                {% if game.game_description %}
+                <p class="game-description-header">{{ game.game_description }}</p>
+                {% endif %}
+                <p><strong>Room Code:</strong> {{ game.room_code }}</p>
+            </div>
             <a href="{{ url_for('host_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
         </div>
         
@@ -77,10 +83,7 @@
                         <h3>Current Answerer</h3>
                         <div id="currentAnswerer"></div>
                         <div id="submittedAnswer" class="submitted-answer"></div>
-                        <div class="answer-actions">
-                            <button id="correctBtn" class="btn btn-success">Correct</button>
-                            <button id="wrongBtn" class="btn btn-danger">Wrong</button>
-                        </div>
+                        <p><em>Answer will be automatically checked when player submits.</em></p>
                     </div>
                     <div id="answerHistory" class="answer-history" style="display: none;">
                         <h3>Answer History</h3>
@@ -96,6 +99,15 @@
         <div class="modal-content question-modal-content">
             <span class="close">&times;</span>
             <div id="questionModalContent">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Answer Result Popup Modal -->
+    <div id="answerResultModal" class="modal">
+        <div class="modal-content answer-result-modal-content">
+            <div id="answerResultContent">
                 <!-- Content will be populated by JavaScript -->
             </div>
         </div>

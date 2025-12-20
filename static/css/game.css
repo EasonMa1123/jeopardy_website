@@ -23,6 +23,13 @@
     text-shadow: none;
 }
 
+.game-description-header {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9em;
+    margin-top: 5px;
+    font-style: italic;
+}
+
 .game-layout {
     display: grid;
     grid-template-columns: 2fr 1fr;
@@ -95,14 +102,16 @@
     align-items: center;
 }
 
-.question-card:hover:not(.answered) {
+.question-card:hover:not(.answered):not([data-answered="true"]) {
     transform: scale(1.05);
     box-shadow: 0 5px 20px rgba(0,0,0,0.3);
 }
 
 .question-card[data-answered="true"] {
-    opacity: 0.8;
-    /* Questions can still be clicked even if answered */
+    opacity: 0.5;
+    background: #0f2954;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 .question-category {
@@ -341,10 +350,56 @@
     color: #721c24;
 }
 
-.question-card.answered {
-    cursor: not-allowed;
-    opacity: 0.6;
+.answer-result-modal-content {
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
 }
+
+.answer-result-popup {
+    padding: 30px;
+}
+
+.answer-result-popup.correct {
+    background: #d4edda;
+    border: 3px solid #28a745;
+    border-radius: 10px;
+}
+
+.answer-result-popup.incorrect {
+    background: #f8d7da;
+    border: 3px solid #dc3545;
+    border-radius: 10px;
+}
+
+.answer-result-popup h2 {
+    font-size: 36px;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.answer-result-popup.correct h2 {
+    color: #155724;
+}
+
+.answer-result-popup.incorrect h2 {
+    color: #721c24;
+}
+
+.answer-result-message {
+    font-size: 18px;
+    margin: 20px 0;
+    line-height: 1.6;
+    color: #333;
+}
+
+.answer-result-popup .btn {
+    margin-top: 20px;
+    padding: 12px 30px;
+    font-size: 18px;
+}
+
+/* Removed - answered questions should remain clickable with darker styling via data-answered attribute */
 
 .current-question-section {
     margin-bottom: 30px;
@@ -420,6 +475,23 @@
     background: #fff3cd;
     border-left-color: #ffc107;
     font-weight: bold;
+}
+
+.player-item .answer-status {
+    font-weight: bold;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.player-item .answer-status.correct {
+    color: #28a745;
+    background: #d4edda;
+}
+
+.player-item .answer-status.incorrect {
+    color: #dc3545;
+    background: #f8d7da;
 }
 
 .player-name {

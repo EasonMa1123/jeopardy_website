@@ -21,7 +21,11 @@
             <div id="gamesList" class="games-list">
                 {% for game in games %}
                 <div class="game-card">
-                    <h3>Room: {{ game.room_code }}</h3>
+                    <h3>{% if game.game_name %}{{ game.game_name }}{% else %}Room: {{ game.room_code }}{% endif %}</h3>
+                    {% if game.game_description %}
+                    <p class="game-description">{{ game.game_description }}</p>
+                    {% endif %}
+                    <p><strong>Room Code:</strong> {{ game.room_code }}</p>
                     <p>Status: {{ game.status }}</p>
                     <p>Questions: {{ game.question_count or 0 }}</p>
                     <p>Created: {{ game.created_at }}</p>
