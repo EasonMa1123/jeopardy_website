@@ -48,9 +48,7 @@ python app.py
 The database tables will be automatically created on first run.
 
 4. Access the application:
-- Home: http://localhost:5000
-- Host Login: http://localhost:5000/host/login
-- Player Join: http://localhost:5000/player/join
+- https://jeopardy-website-40274242615.europe-west9.run.app
 
 ## Usage
 
