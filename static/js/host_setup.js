@@ -17,7 +17,17 @@ function setupEventListeners() {
     const modalTitle = document.getElementById('modalTitle');
     const submitBtn = document.getElementById('submitBtn');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
+    const imageFileInput = document.getElementById('image_file');
+    const audioFileInput = document.getElementById('audio_file');
+    const imagePreview = document.getElementById('imagePreview');
+    const imagePreviewImg = document.getElementById('imagePreviewImg');
+    const audioPreview = document.getElementById('audioPreview');
+    const audioPreviewPlayer = document.getElementById('audioPreviewPlayer');
+    const removeImageBtn = document.getElementById('removeImageBtn');
+    const removeAudioBtn = document.getElementById('removeAudioBtn');
     let isEditMode = false;
+    let currentImagePath = null;
+    let currentAudioPath = null;
     
     // Toggle between MC and type answer
     questionTypeSelect.addEventListener('change', function() {
@@ -43,7 +53,62 @@ function setupEventListeners() {
         cancelEditBtn.style.display = 'none';
         addQuestionForm.reset();
         questionTypeSelect.dispatchEvent(new Event('change'));
+        // Reset file previews
+        imagePreview.style.display = 'none';
+        audioPreview.style.display = 'none';
+        removeImageBtn.style.display = 'none';
+        removeAudioBtn.style.display = 'none';
+        currentImagePath = null;
+        currentAudioPath = null;
     }
+    
+    // Image file preview
+    imageFileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreviewImg.src = e.target.result;
+                imagePreview.style.display = 'block';
+                removeImageBtn.style.display = 'inline-block';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Audio file preview
+    audioFileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            audioPreviewPlayer.src = url;
+            audioPreview.style.display = 'block';
+            removeAudioBtn.style.display = 'inline-block';
+        }
+    });
+    
+    // Remove image
+    removeImageBtn.addEventListener('click', function() {
+        imageFileInput.value = '';
+        imagePreview.style.display = 'none';
+        removeImageBtn.style.display = 'none';
+        if (isEditMode && currentImagePath) {
+            // Mark for removal on server
+            currentImagePath = null;
+        }
+    });
+    
+    // Remove audio
+    removeAudioBtn.addEventListener('click', function() {
+        audioFileInput.value = '';
+        audioPreview.style.display = 'none';
+        removeAudioBtn.style.display = 'none';
+        audioPreviewPlayer.src = '';
+        if (isEditMode && currentAudioPath) {
+            // Mark for removal on server
+            currentAudioPath = null;
+        }
+    });
     
     addQuestionBtn.addEventListener('click', () => {
         resetToAddMode();
@@ -119,6 +184,28 @@ function setupEventListeners() {
                     answerInput.value = question.answer;
                 }
                 
+                // Handle image and audio
+                currentImagePath = question.image_path || null;
+                currentAudioPath = question.audio_path || null;
+                
+                if (currentImagePath) {
+                    imagePreviewImg.src = `/uploads/${currentImagePath}`;
+                    imagePreview.style.display = 'block';
+                    removeImageBtn.style.display = 'inline-block';
+                } else {
+                    imagePreview.style.display = 'none';
+                    removeImageBtn.style.display = 'none';
+                }
+                
+                if (currentAudioPath) {
+                    audioPreviewPlayer.src = `/uploads/${currentAudioPath}`;
+                    audioPreview.style.display = 'block';
+                    removeAudioBtn.style.display = 'inline-block';
+                } else {
+                    audioPreview.style.display = 'none';
+                    removeAudioBtn.style.display = 'none';
+                }
+                
                 modal.style.display = 'block';
             } else {
                 alert('Error loading question: ' + (data.error || 'Unknown error'));
@@ -149,32 +236,48 @@ function setupEventListeners() {
             answer = answerInput.value.trim();
         }
         
-        const formData = {
-            category: document.getElementById('category').value,
-            value: parseInt(document.getElementById('value').value),
-            question_text: document.getElementById('question_text').value,
-            answer: answer,
-            question_type: questionType,
-            options: options
-        };
+        // Use FormData to support file uploads
+        const formData = new FormData();
+        formData.append('category', document.getElementById('category').value);
+        formData.append('value', document.getElementById('value').value);
+        formData.append('question_text', document.getElementById('question_text').value);
+        formData.append('answer', answer);
+        formData.append('question_type', questionType);
+        formData.append('options', options);
+        
+        // Add files if selected
+        if (imageFileInput.files[0]) {
+            formData.append('image_file', imageFileInput.files[0]);
+        }
+        if (audioFileInput.files[0]) {
+            formData.append('audio_file', audioFileInput.files[0]);
+        }
+        
+        // For edit mode, handle file removal
+        if (isEditMode) {
+            if (!imageFileInput.files[0] && !currentImagePath && imagePreview.style.display === 'none') {
+                // Image was removed
+                formData.append('remove_image', 'true');
+            }
+            if (!audioFileInput.files[0] && !currentAudioPath && audioPreview.style.display === 'none') {
+                // Audio was removed
+                formData.append('remove_audio', 'true');
+            }
+        } else {
+            formData.append('game_id', gameId);
+        }
         
         try {
-            let url, method;
+            let url;
             if (isEditMode) {
                 url = `/host/update_question/${editQuestionIdInput.value}`;
-                method = 'POST';
             } else {
                 url = '/host/add_question';
-                method = 'POST';
-                formData.game_id = gameId;
             }
             
             const response = await fetch(url, {
-                method: method,
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(formData)
+                method: 'POST',
+                body: formData  // Don't set Content-Type header, browser will set it with boundary
             });
             
             const data = await response.json();

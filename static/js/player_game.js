@@ -124,6 +124,17 @@ function updateGameState(state) {
     
     if (state.current_question) {
         const question = state.current_question;
+        let imageHtml = '';
+        let audioHtml = '';
+        
+        if (question.image_path) {
+            imageHtml = `<div class="question-media"><img src="/uploads/${question.image_path}" alt="Question Image" style="max-width: 100%; max-height: 300px; margin: 10px 0;"></div>`;
+        }
+        
+        if (question.audio_path) {
+            audioHtml = `<div class="question-media"><audio controls style="width: 100%; margin: 10px 0;"><source src="/uploads/${question.audio_path}" type="audio/mpeg">Your browser does not support the audio element.</audio></div>`;
+        }
+        
         currentQuestionDisplay.innerHTML = `
             <div class="current-question">
                 <div class="question-header">
@@ -131,6 +142,8 @@ function updateGameState(state) {
                     <span class="value">$${question.value}</span>
                 </div>
                 <div class="question-text">${question.question_text}</div>
+                ${imageHtml}
+                ${audioHtml}
             </div>
         `;
         

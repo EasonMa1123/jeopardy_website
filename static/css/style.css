@@ -222,8 +222,11 @@ h2 {
     border-radius: 10px;
     width: 90%;
     max-width: 500px;
+    max-height: 90vh;
     position: relative;
     box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .close {

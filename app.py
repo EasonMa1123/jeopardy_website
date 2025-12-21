@@ -1,12 +1,37 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 import pymysql
 from datetime import datetime
 import secrets
 import json
+import os
 from functools import wraps
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
+
+# Configure upload settings
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a', 'aac'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Create uploads directory if it doesn't exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_FOLDER, 'images'), exist_ok=True)
+os.makedirs(os.path.join(UPLOAD_FOLDER, 'audio'), exist_ok=True)
+
+def allowed_file(filename, file_type='image'):
+    """Check if file extension is allowed"""
+    if '.' not in filename:
+        return False
+    ext = filename.rsplit('.', 1)[1].lower()
+    if file_type == 'image':
+        return ext in ALLOWED_IMAGE_EXTENSIONS
+    elif file_type == 'audio':
+        return ext in ALLOWED_AUDIO_EXTENSIONS
+    return False
 
 
 timeout = 10
@@ -125,6 +150,14 @@ def init_db():
                 pass
             try:
                 cursor.execute("ALTER TABLE questions ADD COLUMN answered_by_player_id INT")
+            except:
+                pass
+            try:
+                cursor.execute("ALTER TABLE questions ADD COLUMN image_path VARCHAR(255)")
+            except:
+                pass
+            try:
+                cursor.execute("ALTER TABLE questions ADD COLUMN audio_path VARCHAR(255)")
             except:
                 pass
             
@@ -361,14 +394,56 @@ def create_game():
 @app.route('/host/add_question', methods=['POST'])
 @host_login_required
 def add_question():
-    data = request.json
-    game_id = data.get('game_id')
-    category = data.get('category')
-    value = data.get('value')
-    question_text = data.get('question_text')
-    answer = data.get('answer')
-    question_type = data.get('question_type', 'type_answer')
-    options = data.get('options', '[]')
+    # Handle both JSON (for backward compatibility) and form-data (for file uploads)
+    if request.content_type and 'application/json' in request.content_type:
+        data = request.json
+        game_id = data.get('game_id')
+        category = data.get('category')
+        value = data.get('value')
+        question_text = data.get('question_text')
+        answer = data.get('answer')
+        question_type = data.get('question_type', 'type_answer')
+        options = data.get('options', '[]')
+        image_file = None
+        audio_file = None
+    else:
+        # Form data with file uploads
+        game_id = request.form.get('game_id')
+        category = request.form.get('category')
+        value = request.form.get('value')
+        question_text = request.form.get('question_text')
+        answer = request.form.get('answer')
+        question_type = request.form.get('question_type', 'type_answer')
+        options = request.form.get('options', '[]')
+        image_file = request.files.get('image_file')
+        audio_file = request.files.get('audio_file')
+    
+    # Handle file uploads
+    image_path = None
+    audio_path = None
+    
+    if image_file and image_file.filename:
+        if allowed_file(image_file.filename, 'image'):
+            filename = secure_filename(image_file.filename)
+            # Add timestamp to avoid conflicts
+            import time
+            filename = f"{int(time.time())}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'images', filename)
+            image_file.save(filepath)
+            image_path = f"images/{filename}"
+        else:
+            return jsonify({'success': False, 'error': 'Invalid image file type'}), 400
+    
+    if audio_file and audio_file.filename:
+        if allowed_file(audio_file.filename, 'audio'):
+            filename = secure_filename(audio_file.filename)
+            import time
+            filename = f"{int(time.time())}_{filename}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'audio', filename)
+            audio_file.save(filepath)
+            audio_path = f"audio/{filename}"
+        else:
+            return jsonify({'success': False, 'error': 'Invalid audio file type'}), 400
     
     import json
     # Validate options is valid JSON
@@ -406,9 +481,9 @@ def add_question():
                 return jsonify({'success': False, 'error': 'Unauthorized'}), 403
             
             cursor.execute("""
-                INSERT INTO questions (game_id, category, value, question_text, answer, question_type, options, correct_option_index)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (game_id, category, value, question_text, answer, question_type, options, correct_option_index))
+                INSERT INTO questions (game_id, category, value, question_text, answer, question_type, options, correct_option_index, image_path, audio_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (game_id, category, value, question_text, answer, question_type, options, correct_option_index, image_path, audio_path))
             conn.commit()
             question_id = cursor.lastrowid
     finally:
@@ -450,57 +525,135 @@ def get_question(question_id):
 @host_login_required
 def update_question(question_id):
     """Update an existing question"""
-    data = request.json
-    category = data.get('category')
-    value = data.get('value')
-    question_text = data.get('question_text')
-    answer = data.get('answer')
-    question_type = data.get('question_type', 'type_answer')
-    options = data.get('options', '[]')
-    
-    import json
-    import random
-    correct_option_index = 0
-    try:
-        if question_type == 'multiple_choice':
-            options_list = json.loads(options) if isinstance(options, str) else options
-            if not isinstance(options_list, list) or len(options_list) < 2:
-                return jsonify({'success': False, 'error': 'Multiple choice questions need at least 2 options'}), 400
-            
-            # First option is the correct answer
-            correct_answer = options_list[0].strip()
-            
-            # Shuffle the options and track which index is correct
-            shuffled_options = options_list.copy()
-            random.shuffle(shuffled_options)
-            correct_option_index = shuffled_options.index(correct_answer)
-            
-            # Store the shuffled options and use the correct answer text
-            options = json.dumps(shuffled_options)
-            answer = correct_answer  # Ensure answer is the correct option text
-        else:
-            options = None
-    except:
-        return jsonify({'success': False, 'error': 'Invalid options format'}), 400
+    # Handle both JSON (for backward compatibility) and form-data (for file uploads)
+    if request.content_type and 'application/json' in request.content_type:
+        data = request.json
+        category = data.get('category')
+        value = data.get('value')
+        question_text = data.get('question_text')
+        answer = data.get('answer')
+        question_type = data.get('question_type', 'type_answer')
+        options = data.get('options', '[]')
+        image_file = None
+        audio_file = None
+        remove_image = data.get('remove_image', False)
+        remove_audio = data.get('remove_audio', False)
+    else:
+        # Form data with file uploads
+        category = request.form.get('category')
+        value = request.form.get('value')
+        question_text = request.form.get('question_text')
+        answer = request.form.get('answer')
+        question_type = request.form.get('question_type', 'type_answer')
+        options = request.form.get('options', '[]')
+        image_file = request.files.get('image_file')
+        audio_file = request.files.get('audio_file')
+        remove_image = request.form.get('remove_image') == 'true'
+        remove_audio = request.form.get('remove_audio') == 'true'
     
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Verify question belongs to host's game
+            # Verify question belongs to host's game and get current paths
             cursor.execute("""
                 SELECT q.* FROM questions q
                 JOIN games g ON q.game_id = g.id
                 WHERE q.id = %s AND g.host_id = %s
             """, (question_id, session['host_id']))
-            if not cursor.fetchone():
+            question = cursor.fetchone()
+            if not question:
                 return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            # Get current file paths
+            current_image_path = question.get('image_path')
+            current_audio_path = question.get('audio_path')
+            
+            # Handle file uploads and removals
+            image_path = current_image_path
+            audio_path = current_audio_path
+            
+            # Remove image if requested
+            if remove_image and current_image_path:
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], current_image_path)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                image_path = None
+            
+            # Remove audio if requested
+            if remove_audio and current_audio_path:
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], current_audio_path)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                audio_path = None
+            
+            # Handle new image upload
+            if image_file and image_file.filename:
+                # Delete old image if exists
+                if current_image_path:
+                    old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], current_image_path)
+                    if os.path.exists(old_filepath):
+                        os.remove(old_filepath)
+                
+                if allowed_file(image_file.filename, 'image'):
+                    filename = secure_filename(image_file.filename)
+                    import time
+                    filename = f"{int(time.time())}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'images', filename)
+                    image_file.save(filepath)
+                    image_path = f"images/{filename}"
+                else:
+                    return jsonify({'success': False, 'error': 'Invalid image file type'}), 400
+            
+            # Handle new audio upload
+            if audio_file and audio_file.filename:
+                # Delete old audio if exists
+                if current_audio_path:
+                    old_filepath = os.path.join(app.config['UPLOAD_FOLDER'], current_audio_path)
+                    if os.path.exists(old_filepath):
+                        os.remove(old_filepath)
+                
+                if allowed_file(audio_file.filename, 'audio'):
+                    filename = secure_filename(audio_file.filename)
+                    import time
+                    filename = f"{int(time.time())}_{filename}"
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'audio', filename)
+                    audio_file.save(filepath)
+                    audio_path = f"audio/{filename}"
+                else:
+                    return jsonify({'success': False, 'error': 'Invalid audio file type'}), 400
+            
+            import json
+            import random
+            correct_option_index = 0
+            try:
+                if question_type == 'multiple_choice':
+                    options_list = json.loads(options) if isinstance(options, str) else options
+                    if not isinstance(options_list, list) or len(options_list) < 2:
+                        return jsonify({'success': False, 'error': 'Multiple choice questions need at least 2 options'}), 400
+                    
+                    # First option is the correct answer
+                    correct_answer = options_list[0].strip()
+                    
+                    # Shuffle the options and track which index is correct
+                    shuffled_options = options_list.copy()
+                    random.shuffle(shuffled_options)
+                    correct_option_index = shuffled_options.index(correct_answer)
+                    
+                    # Store the shuffled options and use the correct answer text
+                    options = json.dumps(shuffled_options)
+                    answer = correct_answer  # Ensure answer is the correct option text
+                else:
+                    options = None
+            except:
+                return jsonify({'success': False, 'error': 'Invalid options format'}), 400
             
             cursor.execute("""
                 UPDATE questions 
                 SET category = %s, value = %s, question_text = %s, answer = %s, 
-                    question_type = %s, options = %s, correct_option_index = %s
+                    question_type = %s, options = %s, correct_option_index = %s,
+                    image_path = %s, audio_path = %s
                 WHERE id = %s
-            """, (category, value, question_text, answer, question_type, options, correct_option_index, question_id))
+            """, (category, value, question_text, answer, question_type, options, correct_option_index, image_path, audio_path, question_id))
             conn.commit()
     finally:
         conn.close()
@@ -525,12 +678,27 @@ def delete_question(question_id):
             if not question or question['host_id'] != session['host_id']:
                 return jsonify({'success': False, 'error': 'Unauthorized'}), 403
             
+            # Delete associated files
+            if question.get('image_path'):
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], question['image_path'])
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            if question.get('audio_path'):
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], question['audio_path'])
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            
             cursor.execute("DELETE FROM questions WHERE id = %s", (question_id,))
             conn.commit()
     finally:
         conn.close()
     
     return jsonify({'success': True})
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    """Serve uploaded files"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route('/host/delete_game/<int:game_id>', methods=['POST'])
 @host_login_required
