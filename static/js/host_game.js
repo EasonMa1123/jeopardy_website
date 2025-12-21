@@ -1,6 +1,8 @@
 let pollInterval;
 let currentBuzzerPlayerId = null;
 let lastAnswerId = null; // Track last answer to show popup only once
+let lastQuestionId = null; // Track last question ID to preserve audio
+let audioState = { currentTime: 0, wasPlaying: false }; // Preserve audio state
 
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
@@ -239,6 +241,38 @@ function updateGameState(state) {
             answerHtml = `<div class="answer-text">Answer: ${question.answer}</div>`;
         }
         
+        // Preserve audio playback state to prevent flashing
+        // Only preserve if it's the same question
+        const isSameQuestion = lastQuestionId === question.id;
+        let currentTime = 0;
+        let wasPlaying = false;
+        
+        if (isSameQuestion && question.audio_path) {
+            // Same question - preserve audio state
+            const existingAudio = currentQuestionDisplay.querySelector('audio');
+            if (existingAudio) {
+                // Check if audio path matches by extracting filename from src
+                const audioSrc = existingAudio.querySelector('source')?.src || existingAudio.src || '';
+                const expectedPath = `/uploads/${question.audio_path}`;
+                if (audioSrc.includes(question.audio_path) || audioSrc.endsWith(expectedPath)) {
+                    currentTime = existingAudio.currentTime || audioState.currentTime;
+                    wasPlaying = !existingAudio.paused || audioState.wasPlaying;
+                    // Update stored state
+                    audioState.currentTime = currentTime;
+                    audioState.wasPlaying = wasPlaying;
+                }
+            } else {
+                // Use stored state if audio element exists but we haven't recreated it yet
+                currentTime = audioState.currentTime;
+                wasPlaying = audioState.wasPlaying;
+            }
+        } else {
+            // Different question - reset audio state
+            audioState = { currentTime: 0, wasPlaying: false };
+        }
+        
+        lastQuestionId = question.id;
+        
         let imageHtml = '';
         let audioHtml = '';
         
@@ -247,7 +281,7 @@ function updateGameState(state) {
         }
         
         if (question.audio_path) {
-            audioHtml = `<div class="question-media"><audio controls style="width: 100%; margin: 10px 0;"><source src="/uploads/${question.audio_path}" type="audio/mpeg">Your browser does not support the audio element.</audio></div>`;
+            audioHtml = `<div class="question-media"><audio id="currentQuestionAudio" controls style="width: 100%; margin: 10px 0;"><source src="/uploads/${question.audio_path}" type="audio/mpeg">Your browser does not support the audio element.</audio></div>`;
         }
         
         currentQuestionDisplay.innerHTML = `
@@ -262,6 +296,31 @@ function updateGameState(state) {
                 ${answerHtml}
             </div>
         `;
+        
+        // Restore audio playback state after a short delay to ensure element is ready
+        if (audioHtml && isSameQuestion && (currentTime > 0 || audioState.currentTime > 0)) {
+            const audio = currentQuestionDisplay.querySelector('#currentQuestionAudio');
+            if (audio) {
+                const timeToRestore = currentTime || audioState.currentTime;
+                const shouldPlay = wasPlaying || audioState.wasPlaying;
+                
+                // Wait for audio to be ready
+                audio.addEventListener('loadedmetadata', () => {
+                    audio.currentTime = timeToRestore;
+                    if (shouldPlay) {
+                        audio.play().catch(() => {}); // Ignore play errors
+                    }
+                }, { once: true });
+                
+                // Also try immediately (in case metadata is already loaded)
+                if (audio.readyState >= 1) {
+                    audio.currentTime = timeToRestore;
+                    if (shouldPlay) {
+                        audio.play().catch(() => {}); // Ignore play errors
+                    }
+                }
+            }
+        }
         
         // Mark question as active in grid
         document.querySelectorAll('.question-card').forEach(card => {

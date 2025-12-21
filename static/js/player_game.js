@@ -1,6 +1,8 @@
 let pollInterval;
 let canBuzz = false;
 let isCurrentBuzzer = false;
+let lastQuestionId = null; // Track last question ID to preserve audio
+let audioState = { currentTime: 0, wasPlaying: false }; // Preserve audio state
 
 // Global function for submitting answers (accessible from MC options)
 async function submitAnswer(answerText) {
@@ -124,6 +126,39 @@ function updateGameState(state) {
     
     if (state.current_question) {
         const question = state.current_question;
+        
+        // Preserve audio playback state to prevent flashing
+        // Only preserve if it's the same question
+        const isSameQuestion = lastQuestionId === question.id;
+        let currentTime = 0;
+        let wasPlaying = false;
+        
+        if (isSameQuestion && question.audio_path) {
+            // Same question - preserve audio state
+            const existingAudio = currentQuestionDisplay.querySelector('audio');
+            if (existingAudio) {
+                // Check if audio path matches by extracting filename from src
+                const audioSrc = existingAudio.querySelector('source')?.src || existingAudio.src || '';
+                const expectedPath = `/uploads/${question.audio_path}`;
+                if (audioSrc.includes(question.audio_path) || audioSrc.endsWith(expectedPath)) {
+                    currentTime = existingAudio.currentTime || audioState.currentTime;
+                    wasPlaying = !existingAudio.paused || audioState.wasPlaying;
+                    // Update stored state
+                    audioState.currentTime = currentTime;
+                    audioState.wasPlaying = wasPlaying;
+                }
+            } else {
+                // Use stored state if audio element exists but we haven't recreated it yet
+                currentTime = audioState.currentTime;
+                wasPlaying = audioState.wasPlaying;
+            }
+        } else {
+            // Different question - reset audio state
+            audioState = { currentTime: 0, wasPlaying: false };
+        }
+        
+        lastQuestionId = question.id;
+        
         let imageHtml = '';
         let audioHtml = '';
         
@@ -132,7 +167,7 @@ function updateGameState(state) {
         }
         
         if (question.audio_path) {
-            audioHtml = `<div class="question-media"><audio controls style="width: 100%; margin: 10px 0;"><source src="/uploads/${question.audio_path}" type="audio/mpeg">Your browser does not support the audio element.</audio></div>`;
+            audioHtml = `<div class="question-media"><audio id="currentQuestionAudio" controls style="width: 100%; margin: 10px 0;"><source src="/uploads/${question.audio_path}" type="audio/mpeg">Your browser does not support the audio element.</audio></div>`;
         }
         
         currentQuestionDisplay.innerHTML = `
@@ -146,6 +181,31 @@ function updateGameState(state) {
                 ${audioHtml}
             </div>
         `;
+        
+        // Restore audio playback state after a short delay to ensure element is ready
+        if (audioHtml && isSameQuestion && (currentTime > 0 || audioState.currentTime > 0)) {
+            const audio = currentQuestionDisplay.querySelector('#currentQuestionAudio');
+            if (audio) {
+                const timeToRestore = currentTime || audioState.currentTime;
+                const shouldPlay = wasPlaying || audioState.wasPlaying;
+                
+                // Wait for audio to be ready
+                audio.addEventListener('loadedmetadata', () => {
+                    audio.currentTime = timeToRestore;
+                    if (shouldPlay) {
+                        audio.play().catch(() => {}); // Ignore play errors
+                    }
+                }, { once: true });
+                
+                // Also try immediately (in case metadata is already loaded)
+                if (audio.readyState >= 1) {
+                    audio.currentTime = timeToRestore;
+                    if (shouldPlay) {
+                        audio.play().catch(() => {}); // Ignore play errors
+                    }
+                }
+            }
+        }
         
         // Show buzzer if active and player can buzz
         if (state.game.buzzer_active && !state.buzzer_expired) {
@@ -226,7 +286,15 @@ function updateGameState(state) {
             canBuzz = false;
         }
     } else {
-        currentQuestionDisplay.innerHTML = '<p>Waiting for host to start a question...</p>';
+        // No active question - show last correct player if available
+        let lastPlayerHtml = '';
+        if (state.last_correct_player) {
+            lastPlayerHtml = `<div class="last-correct-player" style="margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 5px; color: #155724; border: 2px solid #28a745;">
+                <strong>Last correct answer:</strong> ${state.last_correct_player.name} (Score: $${state.last_correct_player.score})
+                <br><small>This player can choose the next question</small>
+            </div>`;
+        }
+        currentQuestionDisplay.innerHTML = `<p>Waiting for host to start a question...</p>${lastPlayerHtml}`;
         buzzerSection.style.display = 'none';
         answerSection.style.display = 'none';
         canBuzz = false;

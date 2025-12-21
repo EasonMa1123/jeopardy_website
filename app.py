@@ -112,6 +112,10 @@ def init_db():
                 cursor.execute("ALTER TABLE games ADD COLUMN last_answered_question_id INT DEFAULT NULL")
             except:
                 pass
+            try:
+                cursor.execute("ALTER TABLE games ADD COLUMN last_correct_player_id INT DEFAULT NULL")
+            except:
+                pass
             
             # Questions table
             cursor.execute("""
@@ -309,6 +313,116 @@ def host_setup(room_code):
         conn.close()
     
     return render_template('host_setup.html', game=game, questions=questions)
+
+@app.route('/host/export_questions/<int:game_id>')
+@host_login_required
+def export_questions(game_id):
+    """Export questions as JSON (excluding media files)"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify game belongs to host
+            cursor.execute("SELECT id FROM games WHERE id = %s AND host_id = %s", 
+                         (game_id, session['host_id']))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            # Get all questions
+            cursor.execute("""
+                SELECT id, category, value, question_text, answer, question_type, options, correct_option_index
+                FROM questions WHERE game_id = %s ORDER BY category, value
+            """, (game_id,))
+            questions = cursor.fetchall()
+            
+            # Convert to JSON-serializable format
+            import json
+            questions_list = []
+            for q in questions:
+                question_dict = {
+                    'category': q['category'],
+                    'value': q['value'],
+                    'question_text': q['question_text'],
+                    'answer': q['answer'],
+                    'question_type': q['question_type'],
+                }
+                if q['options']:
+                    try:
+                        question_dict['options'] = json.loads(q['options'])
+                    except:
+                        question_dict['options'] = []
+                questions_list.append(question_dict)
+            
+            return jsonify({
+                'success': True,
+                'questions': questions_list
+            })
+    finally:
+        conn.close()
+
+@app.route('/host/import_questions/<int:game_id>', methods=['POST'])
+@host_login_required
+def import_questions(game_id):
+    """Import questions from JSON"""
+    data = request.json
+    questions_data = data.get('questions', [])
+    
+    if not isinstance(questions_data, list):
+        return jsonify({'success': False, 'error': 'Invalid format: questions must be an array'}), 400
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Verify game belongs to host
+            cursor.execute("SELECT id FROM games WHERE id = %s AND host_id = %s", 
+                         (game_id, session['host_id']))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            
+            import json
+            import random
+            imported_count = 0
+            
+            for q_data in questions_data:
+                category = q_data.get('category', '').strip()
+                value = q_data.get('value', 0)
+                question_text = q_data.get('question_text', '').strip()
+                answer = q_data.get('answer', '').strip()
+                question_type = q_data.get('question_type', 'type_answer')
+                options = q_data.get('options', [])
+                
+                if not category or not question_text or not answer:
+                    continue  # Skip invalid questions
+                
+                correct_option_index = 0
+                options_json = None
+                
+                if question_type == 'multiple_choice' and isinstance(options, list) and len(options) >= 2:
+                    # First option is the correct answer
+                    correct_answer = options[0].strip() if options else ''
+                    
+                    # Shuffle the options and track which index is correct
+                    shuffled_options = options.copy()
+                    random.shuffle(shuffled_options)
+                    correct_option_index = shuffled_options.index(correct_answer) if correct_answer in shuffled_options else 0
+                    
+                    # Store the shuffled options
+                    options_json = json.dumps(shuffled_options)
+                    answer = correct_answer  # Ensure answer is the correct option text
+                
+                cursor.execute("""
+                    INSERT INTO questions (game_id, category, value, question_text, answer, question_type, options, correct_option_index)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (game_id, category, value, question_text, answer, question_type, options_json, correct_option_index))
+                imported_count += 1
+            
+            conn.commit()
+            
+            return jsonify({
+                'success': True,
+                'imported_count': imported_count
+            })
+    finally:
+        conn.close()
 
 @app.route('/host/game/<room_code>')
 @host_login_required
@@ -933,14 +1047,39 @@ def submit_answer():
                     UPDATE questions SET is_answered = TRUE, answered_by_player_id = %s WHERE id = %s
                 """, (player_id, question['id'],))
                 
-                # Reset game state
-                cursor.execute("""
-                    UPDATE games 
-                    SET current_question_id = NULL,
-                        buzzer_active = FALSE,
-                        current_buzzer_player_id = NULL
-                    WHERE id = %s
-                """, (player['game_id'],))
+                # Reset game state and track last correct player
+                try:
+                    cursor.execute("""
+                        UPDATE games 
+                        SET current_question_id = NULL,
+                            buzzer_active = FALSE,
+                            current_buzzer_player_id = NULL,
+                            last_correct_player_id = %s
+                        WHERE id = %s
+                    """, (player_id, player['game_id'],))
+                except Exception as e:
+                    # If column doesn't exist, try to add it
+                    if "Unknown column 'last_correct_player_id'" in str(e):
+                        try:
+                            cursor.execute("ALTER TABLE games ADD COLUMN last_correct_player_id INT DEFAULT NULL")
+                            cursor.execute("""
+                                UPDATE games 
+                                SET current_question_id = NULL,
+                                    buzzer_active = FALSE,
+                                    current_buzzer_player_id = NULL,
+                                    last_correct_player_id = %s
+                                WHERE id = %s
+                            """, (player_id, player['game_id'],))
+                        except:
+                            cursor.execute("""
+                                UPDATE games 
+                                SET current_question_id = NULL,
+                                    buzzer_active = FALSE,
+                                    current_buzzer_player_id = NULL
+                                WHERE id = %s
+                            """, (player['game_id'],))
+                    else:
+                        raise
                 
                 # Reset all players' buzzer status
                 cursor.execute("""
@@ -1166,6 +1305,12 @@ def host_game_state(room_code):
             # No timeout - buzzer stays active until all players buzz or someone answers correctly
             buzzer_expired = False
             
+            # Get last correct player info
+            last_correct_player = None
+            if game.get('last_correct_player_id'):
+                cursor.execute("SELECT id, name, score FROM players WHERE id = %s", (game['last_correct_player_id'],))
+                last_correct_player = cursor.fetchone()
+            
     finally:
         conn.close()
     
@@ -1179,7 +1324,8 @@ def host_game_state(room_code):
         'answer_history': answer_history,
         'countdown_remaining': countdown_remaining,
         'questions': questions_status,
-        'recent_answer': recent_answer
+        'recent_answer': recent_answer,
+        'last_correct_player': last_correct_player
     })
 
 # Player routes
@@ -1367,31 +1513,37 @@ def player_submit_answer():
                     UPDATE questions SET is_answered = TRUE, answered_by_player_id = %s WHERE id = %s
                 """, (player_id, question['id'],))
                 
-                # Reset game state - store question_id before clearing for popup display
+                # Reset game state - store question_id and track last correct player
                 try:
                     cursor.execute("""
                         UPDATE games 
                         SET current_question_id = NULL,
                             buzzer_active = FALSE,
                             current_buzzer_player_id = NULL,
-                            last_answered_question_id = %s
+                            last_answered_question_id = %s,
+                            last_correct_player_id = %s
                         WHERE id = %s
-                    """, (question['id'], player['game_id'],))
+                    """, (question['id'], player_id, player['game_id'],))
                 except Exception as e:
                     # If column doesn't exist, try without it and attempt to add column
-                    if "Unknown column 'last_answered_question_id'" in str(e):
-                        cursor.execute("""
-                            UPDATE games 
-                            SET current_question_id = NULL,
-                                buzzer_active = FALSE,
-                                current_buzzer_player_id = NULL
-                            WHERE id = %s
-                        """, (player['game_id'],))
-                        # Try to add the column for future use
+                    error_str = str(e)
+                    if "Unknown column 'last_answered_question_id'" in error_str or "Unknown column 'last_correct_player_id'" in error_str:
                         try:
                             cursor.execute("ALTER TABLE games ADD COLUMN last_answered_question_id INT DEFAULT NULL")
                         except:
                             pass
+                        try:
+                            cursor.execute("ALTER TABLE games ADD COLUMN last_correct_player_id INT DEFAULT NULL")
+                        except:
+                            pass
+                        cursor.execute("""
+                            UPDATE games 
+                            SET current_question_id = NULL,
+                                buzzer_active = FALSE,
+                                current_buzzer_player_id = NULL,
+                                last_correct_player_id = %s
+                            WHERE id = %s
+                        """, (player_id, player['game_id'],))
                     else:
                         raise
                 
@@ -1508,6 +1660,12 @@ def player_game_state(room_code):
             
             is_current_buzzer = game['current_buzzer_player_id'] == player_id
             
+            # Get last correct player info
+            last_correct_player = None
+            if game.get('last_correct_player_id'):
+                cursor.execute("SELECT id, name, score FROM players WHERE id = %s", (game['last_correct_player_id'],))
+                last_correct_player = cursor.fetchone()
+            
     finally:
         conn.close()
     
@@ -1519,7 +1677,8 @@ def player_game_state(room_code):
         'can_buzz': can_buzz,
         'buzzer_expired': buzzer_expired,
         'is_current_buzzer': is_current_buzzer,
-        'countdown_remaining': countdown_remaining
+        'countdown_remaining': countdown_remaining,
+        'last_correct_player': last_correct_player
     })
 
 if __name__ == '__main__':

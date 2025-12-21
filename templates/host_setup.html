@@ -11,7 +11,10 @@
     <div class="game-container">
         <div class="game-header">
             <h1>Setup Questions - Room: {{ game.room_code }}</h1>
-            <div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button id="exportQuestionsBtn" class="btn btn-secondary">Export Questions</button>
+                <button id="importQuestionsBtn" class="btn btn-secondary">Import Questions</button>
+                <input type="file" id="importQuestionsFile" accept=".json" style="display: none;">
                 <a href="{{ url_for('host_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
                 <a href="{{ url_for('host_game', room_code=game.room_code) }}" class="btn btn-primary">Start Game</a>
             </div>

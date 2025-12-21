@@ -1,6 +1,94 @@
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
+    setupExportImport();
 });
+
+function setupExportImport() {
+    const exportBtn = document.getElementById('exportQuestionsBtn');
+    const importBtn = document.getElementById('importQuestionsBtn');
+    const importFile = document.getElementById('importQuestionsFile');
+    
+    if (exportBtn) {
+        exportBtn.addEventListener('click', async function() {
+            try {
+                const response = await fetch(`/host/export_questions/${gameId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Create and download JSON file
+                    const jsonStr = JSON.stringify(data.questions, null, 2);
+                    const blob = new Blob([jsonStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `questions_${gameId}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    alert(`Exported ${data.questions.length} questions successfully!`);
+                } else {
+                    alert('Error exporting questions: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                alert('Error exporting questions: ' + error.message);
+            }
+        });
+    }
+    
+    if (importBtn) {
+        importBtn.addEventListener('click', function() {
+            importFile.click();
+        });
+    }
+    
+    if (importFile) {
+        importFile.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                const text = await file.text();
+                const jsonData = JSON.parse(text);
+                
+                if (!Array.isArray(jsonData) && !Array.isArray(jsonData.questions)) {
+                    alert('Invalid format: JSON must contain an array of questions or have a "questions" property');
+                    return;
+                }
+                
+                const questions = Array.isArray(jsonData) ? jsonData : jsonData.questions;
+                
+                if (!confirm(`Import ${questions.length} questions? This will add them to the existing questions.`)) {
+                    return;
+                }
+                
+                const response = await fetch(`/host/import_questions/${gameId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ questions: questions })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Successfully imported ${data.imported_count} questions!`);
+                    location.reload(); // Reload to show new questions
+                } else {
+                    alert('Error importing questions: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                alert('Error importing questions: ' + error.message);
+            } finally {
+                // Reset file input
+                importFile.value = '';
+            }
+        });
+    }
+}
 
 function setupEventListeners() {
     // Add Question Modal
