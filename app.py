@@ -174,10 +174,17 @@ def init_db():
                     score INT DEFAULT 0,
                     buzzer_order INT DEFAULT 0,
                     can_buzz BOOLEAN DEFAULT TRUE,
+                    buzzer_reopen_time TIMESTAMP NULL,
                     FOREIGN KEY (game_id) REFERENCES games(id),
                     INDEX idx_game_id (game_id)
                 )
             """)
+            
+            # Add buzzer_reopen_time column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE players ADD COLUMN buzzer_reopen_time TIMESTAMP NULL")
+            except:
+                pass
             
             # Answers table (track answer attempts)
             cursor.execute("""
@@ -489,11 +496,21 @@ def create_game():
     game_name = data.get('game_name', '').strip() or None
     game_description = data.get('game_description', '').strip() or None
     
-    room_code = secrets.token_urlsafe(6).upper()[:6]
+    # Generate 6-digit room code when game is created
+    import random
+    room_code = f"{random.randint(100000, 999999):06d}"
     
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # Ensure uniqueness by checking if code exists
+            max_attempts = 10
+            for attempt in range(max_attempts):
+                cursor.execute("SELECT id FROM games WHERE room_code = %s", (room_code,))
+                if not cursor.fetchone():
+                    break
+                room_code = f"{random.randint(100000, 999999):06d}"
+            
             cursor.execute("""
                 INSERT INTO games (room_code, host_id, game_name, game_description) 
                 VALUES (%s, %s, %s, %s)
@@ -899,7 +916,18 @@ def restart_game(game_id):
                 DELETE FROM players WHERE game_id = %s
             """, (game_id,))
             
-            # Reset game state
+            # Generate new 6-digit room code on restart
+            import random
+            new_room_code = f"{random.randint(100000, 999999):06d}"
+            # Ensure uniqueness by checking if code exists
+            max_attempts = 10
+            for attempt in range(max_attempts):
+                cursor.execute("SELECT id FROM games WHERE room_code = %s AND id != %s", (new_room_code, game_id))
+                if not cursor.fetchone():
+                    break
+                new_room_code = f"{random.randint(100000, 999999):06d}"
+            
+            # Reset game state and regenerate room code
             cursor.execute("""
                 UPDATE games 
                 SET is_ended = FALSE,
@@ -907,14 +935,10 @@ def restart_game(game_id):
                     buzzer_active = FALSE,
                     current_buzzer_player_id = NULL,
                     question_start_time = NULL,
-                    buzzer_reopen_time = NULL
+                    buzzer_reopen_time = NULL,
+                    room_code = %s
                 WHERE id = %s
-            """, (game_id,))
-            
-            # Reset all players' buzzer status
-            cursor.execute("""
-                UPDATE players SET can_buzz = TRUE WHERE game_id = %s
-            """, (game_id,))
+            """, (new_room_code, game_id))
             
             conn.commit()
     finally:
@@ -944,12 +968,13 @@ def start_question():
                 return jsonify({'success': False, 'error': 'Question not found'}), 404
             
             # Reset all players' buzzer status (they can all buzz after countdown)
-            # Set can_buzz to TRUE so they can buzz after countdown
+            # Set can_buzz to TRUE and clear buzzer_reopen_time so they can buzz after countdown
             cursor.execute("""
-                UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+                UPDATE players SET can_buzz = TRUE, buzzer_reopen_time = NULL WHERE game_id = %s
             """, (question['game_id'],))
             
             # Update game state - start with buzzer inactive for countdown
+            # Room code stays the same (generated when game was created, only changes on restart)
             # Try to include last_answered_question_id, but handle if column doesn't exist
             try:
                 cursor.execute("""
@@ -1083,7 +1108,7 @@ def submit_answer():
                 
                 # Reset all players' buzzer status
                 cursor.execute("""
-                    UPDATE players SET can_buzz = TRUE WHERE game_id = %s
+                    UPDATE players SET can_buzz = TRUE, buzzer_reopen_time = NULL WHERE game_id = %s
                 """, (player['game_id'],))
             else:
                 # Wrong answer - reopen buzzer for other players (but not this one)
@@ -1093,8 +1118,11 @@ def submit_answer():
                 """, (player['game_id'],))
                 
                 # Re-enable buzzer for all players except the one who just answered
+                # (but only if their individual buzzer_reopen_time has passed)
                 cursor.execute("""
-                    UPDATE players SET can_buzz = TRUE WHERE game_id = %s AND id != %s
+                    UPDATE players SET can_buzz = TRUE 
+                    WHERE game_id = %s AND id != %s
+                    AND (buzzer_reopen_time IS NULL OR buzzer_reopen_time <= NOW())
                 """, (player['game_id'], player_id))
                 
                 # Keep this player's can_buzz as FALSE (they already answered)
@@ -1263,15 +1291,18 @@ def host_game_state(room_code):
                             incorrect_count = incorrect_count_result['incorrect_count'] if incorrect_count_result else 0
                             
                             # If all players have answered incorrectly, re-enable all who answered wrong
+                            # (but only if their individual buzzer_reopen_time has passed)
                             # Otherwise, only enable players who haven't answered yet
                             if incorrect_count >= total_players:
-                                # All players have answered incorrectly, re-enable all who answered wrong
+                                # All players have answered incorrectly, re-enable those whose buzzer_reopen_time has passed
                                 cursor.execute("""
                                     UPDATE players SET can_buzz = TRUE 
-                                    WHERE game_id = %s AND id IN (
+                                    WHERE game_id = %s 
+                                    AND id IN (
                                         SELECT DISTINCT player_id FROM answers 
                                         WHERE question_id = %s AND is_correct = FALSE
                                     )
+                                    AND (buzzer_reopen_time IS NULL OR buzzer_reopen_time <= NOW())
                                 """, (game['id'], game['current_question_id']))
                             else:
                                 # Not all have answered wrong yet, only enable players who haven't answered
@@ -1282,6 +1313,7 @@ def host_game_state(room_code):
                                         SELECT DISTINCT player_id FROM answers 
                                         WHERE question_id = %s
                                     )
+                                    AND (buzzer_reopen_time IS NULL OR buzzer_reopen_time <= NOW())
                                 """, (game['id'], game['current_question_id']))
                             
                             # Time to reopen buzzer
@@ -1295,9 +1327,11 @@ def host_game_state(room_code):
                         cursor.execute("""
                             UPDATE games SET buzzer_active = TRUE WHERE id = %s
                         """, (game['id'],))
-                        # Enable buzzer for players who can still buzz
+                        # Enable buzzer for players who can still buzz (and whose buzzer_reopen_time has passed)
                         cursor.execute("""
-                            UPDATE players SET can_buzz = TRUE WHERE game_id = %s AND can_buzz = TRUE
+                            UPDATE players SET can_buzz = TRUE 
+                            WHERE game_id = %s 
+                            AND (buzzer_reopen_time IS NULL OR buzzer_reopen_time <= NOW())
                         """, (game['id'],))
                         conn.commit()
                         game['buzzer_active'] = True
@@ -1332,11 +1366,15 @@ def host_game_state(room_code):
 @app.route('/player/join', methods=['GET', 'POST'])
 def player_join():
     if request.method == 'POST':
-        room_code = request.form.get('room_code', '').upper().strip()
+        room_code = request.form.get('room_code', '').strip()
         player_name = request.form.get('player_name', '').strip()
         
-        if not room_code or not player_name:
-            return render_template('player_join.html', error='Room code and name are required')
+        # Validate room code is 6 digits
+        if not room_code or not room_code.isdigit() or len(room_code) != 6:
+            return render_template('player_join.html', error='Room code must be 6 digits')
+        
+        if not player_name:
+            return render_template('player_join.html', error='Player name is required')
         
         conn = get_db_connection()
         try:
@@ -1552,7 +1590,7 @@ def player_submit_answer():
                     UPDATE players SET can_buzz = TRUE WHERE game_id = %s
                 """, (player['game_id'],))
             else:
-                # Wrong answer - wait 3 seconds (popup auto-close time) before reopening buzzer for other players
+                # Wrong answer - wait 3 seconds before reopening buzzer for other players
                 # Clear current buzzer and set reopen time
                 cursor.execute("""
                     UPDATE games SET current_buzzer_player_id = NULL, 
@@ -1561,9 +1599,13 @@ def player_submit_answer():
                     WHERE id = %s
                 """, (player['game_id'],))
                 
-                # Keep this player's can_buzz as FALSE (they already answered wrong)
-                # They cannot buzz again until all other participants have also answered wrong
-                # Re-enabling logic is handled when buzzer reopens (in host_game_state polling)
+                # Set this player's buzzer_reopen_time to 10 seconds from now
+                # This player must wait 10 seconds before they can buzz again
+                cursor.execute("""
+                    UPDATE players SET can_buzz = FALSE,
+                                      buzzer_reopen_time = DATE_ADD(NOW(), INTERVAL 10 SECOND)
+                    WHERE id = %s
+                """, (player_id,))
             
             conn.commit()
     finally:
@@ -1647,16 +1689,32 @@ def player_game_state(room_code):
                     cursor.execute("""
                         UPDATE games SET buzzer_active = TRUE WHERE id = %s
                     """, (game['id'],))
-                    cursor.execute("""
-                        UPDATE players SET can_buzz = TRUE WHERE game_id = %s
-                    """, (game['id'],))
                     conn.commit()
                     game['buzzer_active'] = True
-                    player['can_buzz'] = True
+            
+            # Check if this player's buzzer_reopen_time has passed
+            player_can_buzz = False
+            if player.get('buzzer_reopen_time'):
+                cursor.execute("""
+                    SELECT TIMESTAMPDIFF(SECOND, NOW(), %s) as time_remaining
+                """, (player['buzzer_reopen_time'],))
+                time_remaining = cursor.fetchone()['time_remaining']
+                if time_remaining <= 0:
+                    # Time has passed, re-enable this player's buzzer
+                    cursor.execute("""
+                        UPDATE players SET can_buzz = TRUE, buzzer_reopen_time = NULL WHERE id = %s
+                    """, (player_id,))
+                    conn.commit()
+                    player_can_buzz = True
+                else:
+                    player_can_buzz = False
+            else:
+                # No buzzer_reopen_time, use can_buzz value
+                player_can_buzz = player['can_buzz']
             
             # No timeout - buzzer stays active until someone answers correctly
             buzzer_expired = False
-            can_buzz = player['can_buzz'] and game['buzzer_active']
+            can_buzz = player_can_buzz and game['buzzer_active']
             
             is_current_buzzer = game['current_buzzer_player_id'] == player_id
             

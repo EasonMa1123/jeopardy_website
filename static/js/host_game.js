@@ -7,6 +7,36 @@ let audioState = { currentTime: 0, wasPlaying: false }; // Preserve audio state
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     startPolling();
+    initWakeLock();
+});
+
+// Screen Wake Lock API to prevent device from going idle
+let wakeLock = null;
+
+async function initWakeLock() {
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => {
+                console.log('Wake Lock was released');
+            });
+        } catch (err) {
+            console.error('Wake Lock error:', err);
+        }
+    }
+}
+
+// Re-acquire wake lock when page becomes visible again
+document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && 'wakeLock' in navigator) {
+        try {
+            if (wakeLock === null) {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (err) {
+            console.error('Wake Lock error:', err);
+        }
+    }
 });
 
 function setupEventListeners() {

@@ -10,13 +10,14 @@
 <body>
     <div class="game-container">
         <div class="game-header">
-            <div>
+            <div style="display: flex; flex-direction: row; gap: 10px;">
                 <h1>{% if game.game_name %}{{ game.game_name }}{% else %}Room: {{ game.room_code }}{% endif %}</h1>
                 {% if game.game_description %}
                 <p class="game-description-header">{{ game.game_description }}</p>
                 {% endif %}
-                <p><strong>Room Code:</strong> {{ game.room_code }}</p>
+                
             </div>
+            <p style="font-size: 4rem;"><strong>Room Code: {{ game.room_code }}</strong></p>
             <a href="{{ url_for('host_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
         </div>
         
